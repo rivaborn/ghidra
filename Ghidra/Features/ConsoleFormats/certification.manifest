@@ -1,0 +1,5 @@
+##VERSION: 2.0
+Module.manifest||GHIDRA||||END|
+README.md||GHIDRA||||END|
+ghidra_scripts/Ps2VuExtractMicrocode.java||GHIDRA||||END|
+ghidra_scripts/Ps2VuFindMicrocode.java||GHIDRA||||END|
