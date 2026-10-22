@@ -50,6 +50,15 @@ public interface PcodeOverride {
 	Address getFallThroughOverride();
 
 	/**
+	 * Returns true if the fall-through of the current instruction has been cleared by an
+	 * override (terminal flow): flow must not continue into the next instruction.
+	 * @return true if the fall-through was removed
+	 */
+	default boolean isFallThroughCleared() {
+		return false;
+	}
+
+	/**
 	 * Returns the call-fixup for a specified call destination.
 	 * @param callDestAddr call destination address.  This address is used to 
 	 * identify a function which may have been tagged with a CallFixup.  
