@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<language_definitions>
+  <language processor="LR35902"
+            endian="little"
+            size="16"
+            variant="default"
+            version="1.0"
+            slafile="lr35902.sla"
+            processorspec="lr35902.pspec"
+            id="LR35902:LE:16:default">
+    <description>Sharp LR35902 / SM83 (Nintendo Game Boy and Game Boy Color CPU)</description>
+    <compiler name="default" spec="lr35902.cspec" id="default"/>
+    <external_name tool="gnu" name="gbz80"/>
+  </language>
+</language_definitions>
