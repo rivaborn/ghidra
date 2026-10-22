@@ -1055,6 +1055,16 @@ Symbol *Funcdata::handleSymbolConflict(SymbolEntry *entry,Varnode *vn)
   }
 
   // If we reach here, we have a conflicting variable
+  DynamicHash dhash;
+  dhash.uniqueHash(vn,this);
+  if (dhash.getHash() == 0) {
+    // No hash distinguishes this Varnode from its neighbors (more than 8 share its local data-flow,
+    // as in large inlined code).  buildDynamicSymbol would throw and abandon the whole function
+    // over one variable's name; keep the Varnode on the conflicting Symbol instead and say so.
+    warning("Variable shares a name with another: no unique dynamic hash",vn->getUsePoint(*this));
+    vn->setSymbolEntry(entry);
+    return entry->getSymbol();
+  }
   buildDynamicSymbol(vn);
   return vn->getSymbolEntry()->getSymbol();
 }
