@@ -77,6 +77,9 @@ public class HeadlessOptions {
 	// -noanalysis
 	boolean analyze;
 
+	// -failOnScriptError
+	boolean failOnScriptError;
+
 	// -processor
 	Language language;
 
@@ -137,6 +140,7 @@ public class HeadlessOptions {
 		readOnly = false;
 		deleteProject = false;
 		analyze = true;
+		failOnScriptError = false;
 		language = null;
 		compilerSpec = null;
 		perFileTimeout = -1;
@@ -380,6 +384,17 @@ public class HeadlessOptions {
 	 */
 	public void setDeleteCreatedProjectOnClose(boolean enabled) {
 		this.deleteProject = enabled;
+	}
+
+	/**
+	 * Exit with code 2 when any script failed (a script that threw, or one that could not be
+	 * found or compiled).  Without it, script errors are only reported in the log and the exit
+	 * code is 0.
+	 *
+	 * @param enabled if true, script errors give a non-zero exit code
+	 */
+	public void setFailOnScriptError(boolean enabled) {
+		this.failOnScriptError = enabled;
 	}
 
 	/**
