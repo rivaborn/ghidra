@@ -112,9 +112,14 @@ foreach ($procModule in $procModules) {
     }
     $languages = Join-Path $dstModule "data\languages"
     $env:JAVA_HOME = $JavaHome
-    $out = & cmd /c "`"$sleigh`" -a `"$languages`" 2>&1"
-    $failed = @($out | Where-Object { $_ -match "error|Error|ERROR" -and $_ -notmatch "0 errors" })
-    if ($LASTEXITCODE -ne 0 -or $failed.Count -gt 0) {
+    # native stderr under 2>&1 would throw with ErrorActionPreference=Stop (Windows PowerShell 5.1)
+    $savedPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $out = @(& $sleigh -a $languages 2>&1 | ForEach-Object { "$_" })
+    $sleighCode = $LASTEXITCODE
+    $ErrorActionPreference = $savedPreference
+    $failed = @($out | Where-Object { $_ -match "error|Error|ERROR" -and $_ -notmatch "0 errors|errors? 0" })
+    if ($sleighCode -ne 0 -or $failed.Count -gt 0) {
         throw ("SLEIGH compile failed for processor $procModule`n" + ($out -join "`n"))
     }
     $count = @(Get-ChildItem $languages -Filter *.sla).Count
