@@ -45,6 +45,7 @@ public abstract class PcodeEmit {
 	private Address startAddress;
 	private Address defaultFallAddress;
 	private Address fallOverride;
+	private boolean fallCleared;						// fall-through removed by an override
 	private int fallOffset;
 	private SleighLanguage language;
 	private AddressFactory addressFactory;
@@ -102,6 +103,7 @@ public abstract class PcodeEmit {
 			if (flowOverride == FlowOverride.NONE) {
 				flowOverride = null;
 			}
+			fallCleared = override.isFallThroughCleared();
 			fallOverride = override.getFallThroughOverride();
 			if (fallOverride != null) {
 				Address instrAddr = override.getInstructionStart();
@@ -178,9 +180,19 @@ public abstract class PcodeEmit {
 	 * <li>last pcode op has fall-through</li>
 	 * <li>internal label used to branch beyond last pcode op</li>
 	 * </ul>
+	 * A cleared fall-through (terminal flow) adds a final RETURN instead, so that the
+	 * flow ends here rather than continuing into the next instruction.
 	 * @throws IOException for stream errors emitting ops
 	 */
 	void resolveFinalFallthrough() throws IOException {
+		if (fallCleared) {
+			VarnodeData nullAddr = new VarnodeData();
+			nullAddr.space = const_space;
+			nullAddr.offset = 0;
+			nullAddr.size = const_space.getPointerSize();
+			dump(startAddress, PcodeOp.RETURN, new VarnodeData[] { nullAddr }, 1, null);
+			return;
+		}
 		try {
 			if (fallOverride == null) {
 				// handles both length-override and fallthrough override cases

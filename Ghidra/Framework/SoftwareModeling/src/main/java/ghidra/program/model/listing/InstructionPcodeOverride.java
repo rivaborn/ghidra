@@ -85,6 +85,11 @@ public class InstructionPcodeOverride implements PcodeOverride {
 	}
 
 	@Override
+	public boolean isFallThroughCleared() {
+		return instr.isFallThroughOverridden() && instr.getFallThrough() == null;
+	}
+
+	@Override
 	public FlowOverride getFlowOverride() {
 		return instr.getFlowOverride();
 	}
