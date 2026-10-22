@@ -40,12 +40,12 @@ Ghidra loads a module's jars only when their names start with the module name (c
 
 ## Analyzers
 
-| Analyzer                 | What it does                                                                                                                     |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `Snes65816StateAnalyzer` | propagates the M/X/E state from callers to routines and re-disassembles them; bookmarks routines whose callers disagree          |
-| `GameBoyBankAnalyzer`    | resolves calls and jumps into 4000-7FFF to the right bank overlay where the bank number is a known constant; labels bank helpers |
-| `SegaMapperBankAnalyzer` | the same for Master System / Game Gear slots 1 and 2                                                                             |
-| `Ps2VuMicrocodeAnalyzer` | finds VIF MPG packets in R5900 programs and bookmarks them (`Ps2VuMicrocodeFinder`)                                              |
+| Analyzer                 | What it does                                                                                                                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Snes65816StateAnalyzer` | propagates the M/X/E state from callers to routines and re-disassembles them; bookmarks routines whose callers disagree                                                                                                                                                                    |
+| `GameBoyBankAnalyzer`    | resolves calls and jumps into 4000-7FFF to the right bank overlay (straight-line window, then a data flow over the routine from its callers' bank); far calls with register or RAM parameters; inline jump tables (`RST`+`dw`); labels `mbc_SetRomBank`, `mbc_FarCall`, `jumptable_Inline` |
+| `SegaMapperBankAnalyzer` | the same bank resolution for Master System / Game Gear slots 1 and 2                                                                                                                                                                                                                       |
+| `Ps2VuMicrocodeAnalyzer` | finds VIF MPG packets in R5900 programs and bookmarks them (`Ps2VuMicrocodeFinder`)                                                                                                                                                                                                        |
 
 Scripts: `Ps2VuFindMicrocode.java`, `Ps2VuExtractMicrocode.java` (extract and import each microprogram).
 
@@ -57,6 +57,12 @@ or key-derived constant is in this module, and keys are never logged.
 ## Tests and limits
 
 All loaders were tested on synthetic files only (no game data): each is picked automatically for
-its format, maps the expected blocks, and decompiles its entry. The limits of each are listed in
+its format, maps the expected blocks, and decompiles its entry. The Game Boy loader and bank analyzer were
+also measured on a real ROM built from source: *Link's Awakening DX* (zladx `LADX-Disassembly`,
+`azle.gbc`, md5 `07c21147…`, MBC5, 64 banks), against the build's own `.sym` file. With the
+analyzer as above: 842 functions, 96.4 % of them starting on a label of the source; 129 of the
+150 calls from bank 0 into 4000-7FFF resolved, all to the right bank (the rest run with a bank
+selected several calls upstream); 9 far calls (`Farcall`) resolved, all right; every function
+decompiles. Before the jump-table, RAM-parameter and data-flow work: 173 functions, 38 calls. The limits of each are listed in
 `nxdecomp/README.md` and the coding_workflow knowledge base. Re-run `install_patched.ps1 -Fresh`
 after changing `ghidra_scripts` (they are copied when the module is first installed).
