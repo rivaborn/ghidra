@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 #include "flow.hh"
+#include "statusreport.hh"
 
 namespace ghidra {
 
@@ -404,6 +405,7 @@ bool FlowInfo::processInstruction(const Address &curaddr,bool &startbasic)
     }
   }
   insn_count += 1;
+  StatusReport::setInstructions(insn_count);
 
   if (obank.empty())
     emptyflag = true;
@@ -881,6 +883,13 @@ void FlowInfo::fillinBranchStubs(void)
     PcodeOp *op = artificialHalt(*iter,PcodeOp::missing);
     data.opMarkStartBasic(op);
     data.opMarkStartInstruction(op);
+    // Register the stub, so branches and jump-table entries to this address find it (target()).
+    // Without this, flow out of a bounded range (setRange) threw "Could not find op at target".
+    VisitStat &stat(visited[*iter]);
+    if (stat.seqnum.getAddr().isInvalid()) {
+      stat.seqnum = op->getSeqNum();
+      stat.size = 1;
+    }
   }
 }
 

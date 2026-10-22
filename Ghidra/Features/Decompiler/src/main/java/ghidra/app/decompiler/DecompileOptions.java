@@ -482,6 +482,7 @@ public class DecompileOptions {
 	private int decompileTimeoutSeconds;
 	private int payloadLimitMBytes;
 	private int maxIntructionsPer;
+	private boolean flowBoundedByBody = false;
 	private int maxJumpTableEntries;
 	private int cachedResultsSize;
 
@@ -1446,6 +1447,24 @@ public class DecompileOptions {
 	 */
 	public void setMaxInstructions(int num) {
 		maxIntructionsPer = num;
+	}
+
+	/**
+	 * @return true if the decompiler only follows flow inside the function's body
+	 */
+	public boolean isFlowBoundedByBody() {
+		return flowBoundedByBody;
+	}
+
+	/**
+	 * Limit the decompiler's flow to the function's body (from its lowest to its highest
+	 * address).  Flow that leaves the body, such as a jump into another function or the
+	 * fall-through past a cut, ends in a return stub instead of being followed.  Off by default:
+	 * the decompiler normally follows flow wherever it goes.  Not saved with the other options.
+	 * @param bounded true to bound flow by the body
+	 */
+	public void setFlowBoundedByBody(boolean bounded) {
+		flowBoundedByBody = bounded;
 	}
 
 	/**

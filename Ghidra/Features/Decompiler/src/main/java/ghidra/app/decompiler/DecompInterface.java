@@ -803,6 +803,7 @@ public class DecompInterface {
 			verifyProcess();
 			activeSet.mainQuery.clear();
 			AddressXML.encode(activeSet.mainQuery, funcEntry);
+			encodeFlowBound(activeSet.mainQuery, func);
 			decompProcess.sendCommandTimeout("decompileAt", timeoutSecs, activeSet);
 			decompileMessage = decompCallback.getNativeMessage();
 		}
@@ -839,8 +840,37 @@ public class DecompInterface {
 			processState = DecompileProcess.DisposeState.DISPOSED_ON_CANCEL;
 		}
 
-		return new DecompileResults(func, pcodelanguage, compilerSpec, dtmanage, decompileMessage,
-			decoder, processState);
+		DecompileResults results = new DecompileResults(func, pcodelanguage, compilerSpec,
+			dtmanage, decompileMessage, decoder, processState);
+		if (printCCode && results.getHighFunction() != null &&
+			results.getCCodeMarkup() == null) {
+			// C was asked for and none came back: a failure, not a completed decompile
+			results.markNoCode();
+		}
+		return results;
+	}
+
+	/**
+	 * With {@link DecompileOptions#isFlowBoundedByBody()}, send the function body's bounds
+	 * after the entry point, so the decompiler does not follow flow outside them.
+	 */
+	private void encodeFlowBound(Encoder encoder, Function func) throws IOException {
+		if (options == null || !options.isFlowBoundedByBody()) {
+			return;
+		}
+		AddressSetView body = func.getBody();
+		if (body.isEmpty()) {
+			return;
+		}
+		Address min = body.getMinAddress();
+		Address max = body.getMaxAddress();
+		if (!min.getAddressSpace().equals(func.getEntryPoint().getAddressSpace()) ||
+			!max.getAddressSpace().equals(min.getAddressSpace())) {
+			return;
+		}
+		encoder.openElement(ELEM_RANGE);
+		AddressXML.encodeAttributes(encoder, min, max);
+		encoder.closeElement(ELEM_RANGE);
 	}
 
 	/** Telemetry: the native decompiler's total CPU time in ms, or 0 if not running */
@@ -866,7 +896,9 @@ public class DecompInterface {
 		long cpu = nativeCpuMillis();
 		// a restarted process starts again from 0
 		long used = cpu >= cpuAtStart ? cpu - cpuAtStart : cpu;
-		return "decompiler pid " + pid + " cpu " + used / 1000 + " s";
+		String status = process.getNativeStatus();
+		return "decompiler pid " + pid + " cpu " + used / 1000 + " s" +
+			(status != null ? ", " + status : "");
 	}
 
 	/**

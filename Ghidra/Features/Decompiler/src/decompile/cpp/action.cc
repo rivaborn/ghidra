@@ -17,6 +17,7 @@
 #include "funcdata.hh"
 
 #include "coreaction.hh"
+#include "statusreport.hh"
 
 namespace ghidra {
 
@@ -299,6 +300,7 @@ int4 Action::perform(Funcdata &data)
 
 {
   int4 res;
+  StatusActionScope statusScope(getName());	// GHIDRA_DECOMPILER_STATUS
 
   do {
     switch(status) {

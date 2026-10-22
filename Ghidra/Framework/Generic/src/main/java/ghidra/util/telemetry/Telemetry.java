@@ -62,6 +62,7 @@ public final class Telemetry {
 	private static volatile String phase = "";
 	private static volatile ProgressMonitor monitor;
 	private static volatile Thread reporter;
+	private static File statusDir;
 	private static long lastCpuNanos = -1;
 	private static long lastReportNanos;
 
@@ -142,6 +143,25 @@ public final class Telemetry {
 			monitor = new ProgressMonitor();
 		}
 		return monitor;
+	}
+
+	/**
+	 * The directory where native decompilers write their status files
+	 * ({@code GHIDRA_DECOMPILER_STATUS}), created on first use.
+	 * @return the directory, or null when telemetry is off or it cannot be created
+	 */
+	public static synchronized File decompilerStatusDir() {
+		if (!ENABLED) {
+			return null;
+		}
+		if (statusDir == null) {
+			File dir = new File(System.getProperty("java.io.tmpdir"),
+				"ghidra-telemetry-" + ProcessHandle.current().pid());
+			if (dir.isDirectory() || dir.mkdirs()) {
+				statusDir = dir;
+			}
+		}
+		return statusDir;
 	}
 
 	/**

@@ -60,6 +60,7 @@ public class DecompileResults {
 	private HighParamID hparamid; //Parameter ID information
 	private ClangTokenGroup docroot; // C code parsed from XML
 	private String errMsg; // Error message from decompiler
+	private boolean noCode; // a function came back without the C that was asked for
 	private DecompileProcess.DisposeState processState;
 
 	public DecompileResults(Function f, Language language, CompilerSpec compilerSpec,
@@ -105,7 +106,18 @@ public class DecompileResults {
 	 * @return true if the decompilation completed.
 	 */
 	public boolean decompileCompleted() {
-		return ((hfunc != null) || (hparamid != null));
+		return ((hfunc != null) || (hparamid != null)) && !noCode;
+	}
+
+	/**
+	 * Mark a decompile that returned a function but none of the C code that was asked for
+	 * (for example when the decompiler failed while printing): it is not completed, and the
+	 * error message says so.
+	 */
+	void markNoCode() {
+		noCode = true;
+		String detail = (errMsg == null || errMsg.isBlank()) ? "" : ": " + errMsg.trim();
+		errMsg = "Decompiler returned no C code" + detail;
 	}
 
 	public Function getFunction() {

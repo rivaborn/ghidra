@@ -82,6 +82,8 @@ class Funcdata {
   string name;			///< Name of function
   string displayName;		///< Name to display in output
   Address baseaddr;		///< Starting code address of binary data
+  Address flowBegin;		///< First address flow may visit (invalid = the whole space)
+  Address flowEnd;		///< Last address flow may visit
   FuncProto funcp;		///< Prototype of this function
   ScopeLocal *localmap;		///< Local variables (symbols in the function scope)
 
@@ -145,6 +147,8 @@ public:
   FunctionSymbol *getSymbol(void) const { return functionSymbol; }	///< Return the symbol associated with \b this function
   bool isHighOn(void) const { return ((flags&highlevel_on)!=0); }	///< Are high-level variables assigned to Varnodes
   bool isProcStarted(void) const { return ((flags&processing_started)!=0); }	///< Has processing of the function started
+  /// rief Limit flow to [b,e] (the function body); flow leaving it ends in a return stub
+  void setFlowRange(const Address &b,const Address &e) { flowBegin = b; flowEnd = e; }
   bool isProcComplete(void) const { return ((flags&processing_complete)!=0); }	///< Is processing of the function complete
   bool hasUnreachableBlocks(void) const { return ((flags&blocks_unreachable)!=0); }	///< Did this function exhibit unreachable code
   bool isTypeRecoveryOn(void) const { return ((flags&typerecovery_on)!=0); }	///< Will data-type analysis be performed

@@ -19,6 +19,8 @@ import static ghidra.program.model.pcode.AttributeId.*;
 import static ghidra.program.model.pcode.ElementId.*;
 
 import java.io.*;
+import java.nio.file.Files;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import ghidra.program.model.address.Address;
@@ -29,6 +31,7 @@ import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.pcode.*;
 import ghidra.util.Msg;
 import ghidra.util.exception.NotFoundException;
+import ghidra.util.telemetry.Telemetry;
 import ghidra.util.timer.GTimer;
 import ghidra.util.timer.GTimerMonitor;
 
@@ -124,6 +127,10 @@ public class DecompileProcess {
 		statusGood = false;
 
 		// Disposing sometimes hangs and we don't want to hang the swing thread.
+		File statusDir = Telemetry.decompilerStatusDir();
+		if (statusDir != null && nativeProcess != null) {
+			statusFile(statusDir, nativeProcess.pid()).delete();
+		}
 		DecompilerDisposer.dispose(nativeProcess, nativeOut, nativeIn);
 	}
 
@@ -137,6 +144,54 @@ public class DecompileProcess {
 	public long getNativePid() {
 		Process p = nativeProcess;
 		return p != null && p.isAlive() ? p.pid() : -1;
+	}
+
+	/**
+	 * The native decompiler's own status (telemetry only): its stage, instructions translated and
+	 * memory, from the file it writes every second.
+	 * @return a short summary, or null when not available
+	 */
+	public String getNativeStatus() {
+		File dir = Telemetry.decompilerStatusDir();
+		long pid = getNativePid();
+		if (dir == null || pid < 0) {
+			return null;
+		}
+		Map<String, String> values = new HashMap<>();
+		try {
+			for (String line : Files.readAllLines(statusFile(dir, pid).toPath())) {
+				int space = line.indexOf(' ');
+				if (space > 0) {
+					values.put(line.substring(0, space), line.substring(space + 1));
+				}
+			}
+		}
+		catch (IOException e) {
+			return null;
+		}
+		StringBuilder b = new StringBuilder();
+		String stage = values.get("stage");
+		if (stage != null && !stage.isEmpty()) {
+			String[] parts = stage.split(" > ");
+			int from = Math.max(0, parts.length - 3);	// the innermost actions
+			b.append("stage ")
+					.append(String.join(" > ", Arrays.copyOfRange(parts, from, parts.length)))
+					.append(", ");
+		}
+		if (values.containsKey("instructions")) {
+			b.append(values.get("instructions")).append(" instructions, ");
+		}
+		b.append("memory ").append(values.getOrDefault("memory_mb", "?")).append(" MB");
+		b.append(" (peak ").append(values.getOrDefault("peak_mb", "?"));
+		String limit = values.get("limit_mb");
+		if (limit != null && !limit.equals("0")) {
+			b.append(", limit ").append(limit);
+		}
+		return b.append(" MB)").toString();
+	}
+
+	private static File statusFile(File dir, long pid) {
+		return new File(dir, "decompile-" + pid + ".status");
 	}
 
 	private void setup() throws IOException {
@@ -156,7 +211,13 @@ public class DecompileProcess {
 		statusGood = false;
 		
 		try {
-			nativeProcess = runtime.exec(exepath);
+			ProcessBuilder builder = new ProcessBuilder(exepath);
+			// Telemetry: the decompiler writes its stage and memory to a status file
+			File statusDir = Telemetry.decompilerStatusDir();
+			if (statusDir != null) {
+				builder.environment().put("GHIDRA_DECOMPILER_STATUS", statusDir.getAbsolutePath());
+			}
+			nativeProcess = builder.start();
 			
 			// Give process time to load and report possible error
 			try {
@@ -232,7 +293,39 @@ public class DecompileProcess {
 				break;
 			}
 		}
-		throw new IOException("Decompiler process died");
+		throw new IOException("Decompiler process died" + exitDescription());
+	}
+
+	/**
+	 * Why the native process ended, for the "died" message: its exit code, named when known
+	 * @return "" if unknown, else " (exit code ...)"
+	 */
+	private String exitDescription() {
+		Process p = nativeProcess;
+		if (p == null) {
+			return "";
+		}
+		try {
+			if (!p.waitFor(2, TimeUnit.SECONDS)) {
+				return "";
+			}
+		}
+		catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			return "";
+		}
+		int code = p.exitValue();
+		String name = switch (code) {
+			case 0xC0000005 -> "access violation";
+			case 0xC00000FD -> "stack overflow";
+			case 0xC0000017, 0xC000012D -> "out of memory";
+			case 0xC0000409 -> "fail-fast / abort";
+			case 3 -> "abort (unhandled C++ exception)";
+			case 1 -> "segmentation fault handler";
+			default -> null;
+		};
+		return " (exit code " + code + String.format(", 0x%08X", code) +
+			(name != null ? ", " + name : "") + ")";
 	}
 
 	private void readToResponse() throws IOException, DecompileException {
@@ -269,7 +362,7 @@ public class DecompileProcess {
 				break;
 			}
 		}
-		throw new IOException("Decompiler process died");
+		throw new IOException("Decompiler process died" + exitDescription());
 	}
 
 	private void readQueryParam(ByteIngest ingester) throws IOException {
@@ -557,7 +650,9 @@ public class DecompileProcess {
 	}
 
 	public synchronized boolean isReady() {
-		return statusGood;
+		// A decompiler that exited (out of memory, crash) is restarted on the next request
+		// instead of failing it
+		return statusGood && nativeProcess != null && nativeProcess.isAlive();
 	}
 
 	/**

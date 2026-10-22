@@ -76,6 +76,7 @@ model {
 						include "modelrules.cc"
 		                include "fspec.cc"
 		                include "action.cc"
+		                include "statusreport.cc"
 		                include "loadimage.cc"
 		                include "varnode.cc"
 		                include "op.cc"
