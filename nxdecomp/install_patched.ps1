@@ -4,6 +4,8 @@
 #   2. build decompile.exe from this checkout (build_decompile.ps1) and put it in the copy;
 #   3. compile every .java file this branch changed since -BaseTag against the copy's jars and
 #      update the classes into their modules' jars (Ghidra/<Area>/<Module>/lib/<Module>.jar).
+#   4. copy every processor module this branch changed or added (Ghidra/Processors/<Module>) and
+#      compile its SLEIGH (.slaspec -> .sla) with the copy's support\sleigh.bat.
 #
 #   powershell -NoProfile -File nxdecomp\install_patched.ps1 -Install <stock install> -OutDir <patched copy>
 #       [-BaseTag Ghidra_12.1.4_build] [-JavaHome <JDK 21+>] [-Fresh] [-SkipNative]
@@ -58,7 +60,7 @@ if (-not $SkipNative) {
 $changed = @(git -C $repo diff --name-only $BaseTag -- "*.java")
 $changed += @(git -C $repo ls-files --others --exclude-standard -- "*.java")
 $changed = @($changed | Where-Object { $_ -match "^Ghidra/[^/]+/[^/]+/src/main/java/" } | Sort-Object -Unique)
-if ($changed.Count -eq 0) { Write-Output "no Java changes since $BaseTag"; exit 0 }
+if ($changed.Count -eq 0) { Write-Output "no Java changes since $BaseTag" } else {
 
 $classes = Join-Path $repo "build-nxdecomp\classes"
 if (Test-Path $classes) { Remove-Item -Recurse -Force $classes }
@@ -89,6 +91,35 @@ foreach ($src in $changed) {
     if ($LASTEXITCODE -ne 0) { throw "jar update failed for $moduleJar" }
     Write-Output ("{0,-12} {1} ({2} classes)" -f $module, $rel, @($files).Count)
 }
+}  # Java changes
+
+# 4. processor modules (SLEIGH): every Ghidra/Processors/<Module> with files changed or added since
+#    the base tag. Its sources (Module.manifest, data/**) are copied over the copy's module folder,
+#    then every .slaspec of the module is compiled (support\sleigh.bat -a) so no .sla is stale. A
+#    new module folder (65816, LR35902) is picked up by Ghidra like the stock ones.
+$procChanged = @(git -C $repo diff --name-only $BaseTag -- "Ghidra/Processors")
+$procChanged += @(git -C $repo ls-files --others --exclude-standard -- "Ghidra/Processors")
+$procModules = @($procChanged | Where-Object { $_ -match "^Ghidra/Processors/([^/]+)/" } |
+    ForEach-Object { ([regex]::Match($_, "^Ghidra/Processors/([^/]+)/")).Groups[1].Value } | Sort-Object -Unique)
+$sleigh = Join-Path $OutDir "support\sleigh.bat"
+foreach ($procModule in $procModules) {
+    $srcModule = Join-Path $repo "Ghidra\Processors\$procModule"
+    $dstModule = Join-Path $OutDir "Ghidra\Processors\$procModule"
+    New-Item -ItemType Directory -Force $dstModule | Out-Null
+    foreach ($item in @("Module.manifest", "data")) {
+        $from = Join-Path $srcModule $item
+        if (Test-Path $from) { Copy-Item -Recurse -Force $from $dstModule }
+    }
+    $languages = Join-Path $dstModule "data\languages"
+    $env:JAVA_HOME = $JavaHome
+    $out = & cmd /c "`"$sleigh`" -a `"$languages`" 2>&1"
+    $failed = @($out | Where-Object { $_ -match "error|Error|ERROR" -and $_ -notmatch "0 errors" })
+    if ($LASTEXITCODE -ne 0 -or $failed.Count -gt 0) {
+        throw ("SLEIGH compile failed for processor $procModule`n" + ($out -join "`n"))
+    }
+    $count = @(Get-ChildItem $languages -Filter *.sla).Count
+    Write-Output ("{0,-12} processor installed, {1} .sla compiled" -f $procModule, $count)
+}
 
 # record what the copy was built from
 $head = git -C $repo rev-parse HEAD
@@ -97,5 +128,6 @@ Set-Content -Encoding UTF8 (Join-Path $OutDir "NXDECOMP_PATCHED.txt") @(
     "Patched from $repo",
     "branch $(git -C $repo rev-parse --abbrev-ref HEAD), commit $head$dirty, base $BaseTag",
     "built $(Get-Date -Format s)",
-    "Java files:", ($changed | ForEach-Object { "  $_" }))
+    "Java files:", ($changed | ForEach-Object { "  $_" }),
+    "Processor modules:", ($procModules | ForEach-Object { "  $_" }))
 Write-Output "patched install ready: $OutDir"
