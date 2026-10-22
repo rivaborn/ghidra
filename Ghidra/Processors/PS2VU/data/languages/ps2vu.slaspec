@@ -1,0 +1,329 @@
+# ###
+# IP: GHIDRA
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ###
+#
+# SLA specification for the PlayStation 2 Vector Units (VU0 / VU1) in micro mode.
+#
+# Microprograms run from micro memory (VU0: 4 KB, VU1: 16 KB) and work on VU data memory
+# (VU0: 4 KB, VU1: 16 KB). Both units share this specification; the ldefs entries
+# PS2VU:LE:32:VU0 and PS2VU:LE:32:VU1 differ only in their pspec (memory sizes).
+# The EFU instructions (E*, WAITP, MFP) and XGKICK/XTOP/XITOP exist on VU1 only.
+#
+# Model:
+#   - space "micro" (code, default): byte addressed micro memory, one LIW = 8 bytes;
+#   - space "vumem": byte addressed VU data memory. Instructions address it in quadwords;
+#     the p-code scales vi-based addresses by 16 (the hardware wraps them at the memory size,
+#     which is not modelled);
+#   - one 64-bit LIW is one instruction: the lower instruction is the little-endian word at
+#     the LIW address, the upper instruction the word at address + 4;
+#   - vf registers are 128 bits (x = bytes 0-3, y 4-7, z 8-11, w 12-15) with 32-bit views
+#     vf<n>x .. vf<n>w; vi registers are 16 bits. Register naming follows the R5900 language's
+#     VU0 macro-mode registers (vf0-vf31, vi0-vi15, ACC, Q, P, I, R).
+#   - vf0 reads as (0, 0, 0, 1.0) and vi0 as 0; writes to them are discarded by the reads.
+#   - The FMAC/FDIV/EFU latencies and stalls are not modelled: results are visible to the
+#     next LIW. The MAC and status flags are not computed by the arithmetic (FMxxx/FSxxx read
+#     the registers as they are); CLIP updates the clipping flag.
+
+define endian=little;
+define alignment=8;
+
+define space micro  type=ram_space      size=4 default;
+define space vumem  type=ram_space      size=4;
+define space register type=register_space size=4;
+
+# Floating-point registers vf0..vf31 (128-bit) and their 32-bit fields
+define register offset=0x0000 size=16 [
+    vf0 vf1 vf2 vf3 vf4 vf5 vf6 vf7 vf8 vf9 vf10 vf11 vf12 vf13 vf14 vf15
+    vf16 vf17 vf18 vf19 vf20 vf21 vf22 vf23 vf24 vf25 vf26 vf27 vf28 vf29 vf30 vf31
+];
+define register offset=0x0000 size=4 [
+    vf0x vf0y vf0z vf0w vf1x vf1y vf1z vf1w vf2x vf2y vf2z vf2w vf3x vf3y vf3z vf3w
+    vf4x vf4y vf4z vf4w vf5x vf5y vf5z vf5w vf6x vf6y vf6z vf6w vf7x vf7y vf7z vf7w
+    vf8x vf8y vf8z vf8w vf9x vf9y vf9z vf9w vf10x vf10y vf10z vf10w vf11x vf11y vf11z vf11w
+    vf12x vf12y vf12z vf12w vf13x vf13y vf13z vf13w vf14x vf14y vf14z vf14w vf15x vf15y vf15z vf15w
+    vf16x vf16y vf16z vf16w vf17x vf17y vf17z vf17w vf18x vf18y vf18z vf18w vf19x vf19y vf19z vf19w
+    vf20x vf20y vf20z vf20w vf21x vf21y vf21z vf21w vf22x vf22y vf22z vf22w vf23x vf23y vf23z vf23w
+    vf24x vf24y vf24z vf24w vf25x vf25y vf25z vf25w vf26x vf26y vf26z vf26w vf27x vf27y vf27z vf27w
+    vf28x vf28y vf28z vf28w vf29x vf29y vf29z vf29w vf30x vf30y vf30z vf30w vf31x vf31y vf31z vf31w
+];
+
+# Accumulator
+define register offset=0x0200 size=16 [ ACC ];
+define register offset=0x0200 size=4  [ ACCx ACCy ACCz ACCw ];
+
+# Integer registers (16 bits)
+define register offset=0x0300 size=2 [
+    vi0 vi1 vi2 vi3 vi4 vi5 vi6 vi7 vi8 vi9 vi10 vi11 vi12 vi13 vi14 vi15
+];
+
+# Special registers: Q (FDIV result), P (EFU result), I (immediate), R (random),
+# the status, MAC and clipping flags, TPC (where the VU stops), PC, and SP (a placeholder
+# stack pointer for the compiler spec; microprograms have no stack).
+define register offset=0x0400 size=4 [
+    Q P I R status_flag mac_flag clip_flag TPC PC SP
+];
+
+# One LIW: lower instruction = bits 31..0, upper instruction = bits 63..32
+define token liw (64)
+    # upper
+    u_ibit  = (63,63)
+    u_ebit  = (62,62)
+    u_mbit  = (61,61)
+    u_dbit  = (60,60)
+    u_tbit  = (59,59)
+    u_zero  = (57,58)
+    u_dest  = (53,56)
+    u_dx    = (56,56)
+    u_dy    = (55,55)
+    u_dz    = (54,54)
+    u_dw    = (53,53)
+    u_ft    = (48,52)
+    u_ftx   = (48,52)
+    u_fty   = (48,52)
+    u_ftz   = (48,52)
+    u_ftw   = (48,52)
+    u_fs    = (43,47)
+    u_fsx   = (43,47)
+    u_fsy   = (43,47)
+    u_fsz   = (43,47)
+    u_fsw   = (43,47)
+    u_fd    = (38,42)
+    u_fdx   = (38,42)
+    u_fdy   = (38,42)
+    u_fdz   = (38,42)
+    u_fdw   = (38,42)
+    u_sp    = (38,42)
+    u_op6   = (32,37)
+    u_op4   = (34,37)
+    u_bc    = (32,33)
+    # lower
+    l_word  = (0,31)
+    l_op7   = (25,31)
+    l_dest  = (21,24)
+    l_dx    = (24,24)
+    l_dy    = (23,23)
+    l_dz    = (22,22)
+    l_dw    = (21,21)
+    l_ftf   = (23,24)
+    l_fsf   = (21,22)
+    l_imm15hi = (21,24)
+    l_imm12hi = (21,21)
+    l_ft    = (16,20)
+    l_ftx   = (16,20)
+    l_fty   = (16,20)
+    l_ftz   = (16,20)
+    l_ftw   = (16,20)
+    l_ithi  = (20,20)
+    l_it    = (16,19)
+    l_fs    = (11,15)
+    l_fsx   = (11,15)
+    l_fsy   = (11,15)
+    l_fsz   = (11,15)
+    l_fsw   = (11,15)
+    l_ishi  = (15,15)
+    l_is    = (11,14)
+    l_idhi  = (10,10)
+    l_id    = (6,9)
+    l_sp    = (6,10)
+    l_imm5  = (6,10) signed
+    l_imm11 = (0,10) signed
+    l_imm11u = (0,10)
+    l_imm24 = (0,23)
+    l_op6   = (0,5)
+    l_op4   = (2,5)
+    l_bc    = (0,1)
+;
+
+attach variables [ u_ft u_fs u_fd l_ft l_fs ] [
+    vf0 vf1 vf2 vf3 vf4 vf5 vf6 vf7 vf8 vf9 vf10 vf11 vf12 vf13 vf14 vf15
+    vf16 vf17 vf18 vf19 vf20 vf21 vf22 vf23 vf24 vf25 vf26 vf27 vf28 vf29 vf30 vf31
+];
+attach variables [ u_ftx u_fsx u_fdx l_ftx l_fsx ] [
+    vf0x vf1x vf2x vf3x vf4x vf5x vf6x vf7x vf8x vf9x vf10x vf11x vf12x vf13x vf14x vf15x
+    vf16x vf17x vf18x vf19x vf20x vf21x vf22x vf23x vf24x vf25x vf26x vf27x vf28x vf29x vf30x vf31x
+];
+attach variables [ u_fty u_fsy u_fdy l_fty l_fsy ] [
+    vf0y vf1y vf2y vf3y vf4y vf5y vf6y vf7y vf8y vf9y vf10y vf11y vf12y vf13y vf14y vf15y
+    vf16y vf17y vf18y vf19y vf20y vf21y vf22y vf23y vf24y vf25y vf26y vf27y vf28y vf29y vf30y vf31y
+];
+attach variables [ u_ftz u_fsz u_fdz l_ftz l_fsz ] [
+    vf0z vf1z vf2z vf3z vf4z vf5z vf6z vf7z vf8z vf9z vf10z vf11z vf12z vf13z vf14z vf15z
+    vf16z vf17z vf18z vf19z vf20z vf21z vf22z vf23z vf24z vf25z vf26z vf27z vf28z vf29z vf30z vf31z
+];
+attach variables [ u_ftw u_fsw u_fdw l_ftw l_fsw ] [
+    vf0w vf1w vf2w vf3w vf4w vf5w vf6w vf7w vf8w vf9w vf10w vf11w vf12w vf13w vf14w vf15w
+    vf16w vf17w vf18w vf19w vf20w vf21w vf22w vf23w vf24w vf25w vf26w vf27w vf28w vf29w vf30w vf31w
+];
+attach variables [ l_it l_is l_id ] [
+    vi0 vi1 vi2 vi3 vi4 vi5 vi6 vi7 vi8 vi9 vi10 vi11 vi12 vi13 vi14 vi15
+];
+
+define pcodeop vu_max;
+define pcodeop vu_mini;
+define pcodeop vu_rnext;
+define pcodeop vu_xtop;
+define pcodeop vu_xitop;
+define pcodeop vu_xgkick;
+define pcodeop vu_eatanxy;
+define pcodeop vu_eatanxz;
+define pcodeop vu_esin;
+define pcodeop vu_eatan;
+define pcodeop vu_eexp;
+
+# ---------------------------------------------------------------------------------------------
+# Upper operand helpers
+
+UDEST: ""            is u_dest=0  { }
+UDEST: ".w"          is u_dest=1  { }
+UDEST: ".z"          is u_dest=2  { }
+UDEST: ".zw"         is u_dest=3  { }
+UDEST: ".y"          is u_dest=4  { }
+UDEST: ".yw"         is u_dest=5  { }
+UDEST: ".yz"         is u_dest=6  { }
+UDEST: ".yzw"        is u_dest=7  { }
+UDEST: ".x"          is u_dest=8  { }
+UDEST: ".xw"         is u_dest=9  { }
+UDEST: ".xz"         is u_dest=10 { }
+UDEST: ".xzw"        is u_dest=11 { }
+UDEST: ".xy"         is u_dest=12 { }
+UDEST: ".xyw"        is u_dest=13 { }
+UDEST: ".xyz"        is u_dest=14 { }
+UDEST: ".xyzw"       is u_dest=15 { }
+
+UBC: "x"             is u_bc=0 { }
+UBC: "y"             is u_bc=1 { }
+UBC: "z"             is u_bc=2 { }
+UBC: "w"             is u_bc=3 { }
+
+# Upper flag bits, printed after the mnemonic: E (end), M (VU0 macro interlock),
+# D (debug break), T (debug halt).
+UFE: ""              is u_ebit=0 { }
+UFE: "[E]"           is u_ebit=1 { }
+UFM: ""              is u_mbit=0 { }
+UFM: "[M]"           is u_mbit=1 { }
+UFD: ""              is u_dbit=0 { }
+UFD: "[D]"           is u_dbit=1 { }
+UFT: ""              is u_tbit=0 { }
+UFT: "[T]"           is u_tbit=1 { }
+UFLAGS: UFE^UFM^UFD^UFT  is UFE & UFM & UFD & UFT { }
+
+# Field reads with vf0 = (0, 0, 0, 1.0)
+uFSx: is u_fs=0   { export 0:4; }
+uFSx: is u_fsx    { export u_fsx; }
+uFSy: is u_fs=0   { export 0:4; }
+uFSy: is u_fsy    { export u_fsy; }
+uFSz: is u_fs=0   { export 0:4; }
+uFSz: is u_fsz    { export u_fsz; }
+uFSw: is u_fs=0   { export 0x3F800000:4; }
+uFSw: is u_fsw    { export u_fsw; }
+uFTx: is u_ft=0   { export 0:4; }
+uFTx: is u_ftx    { export u_ftx; }
+uFTy: is u_ft=0   { export 0:4; }
+uFTy: is u_fty    { export u_fty; }
+uFTz: is u_ft=0   { export 0:4; }
+uFTz: is u_ftz    { export u_ftz; }
+uFTw: is u_ft=0   { export 0x3F800000:4; }
+uFTw: is u_ftw    { export u_ftw; }
+
+# Broadcast field of ft (printed as vf<n>x .. vf<n>w, like the R5900 macro instructions)
+uFTbc: u_ft^"x"      is u_bc=0 & u_ft & uFTx { export uFTx; }
+uFTbc: u_ft^"y"      is u_bc=1 & u_ft & uFTy { export uFTy; }
+uFTbc: u_ft^"z"      is u_bc=2 & u_ft & uFTz { export uFTz; }
+uFTbc: u_ft^"w"      is u_bc=3 & u_ft & uFTw { export uFTw; }
+
+# ---------------------------------------------------------------------------------------------
+# Lower operand helpers
+
+LDEST: ""            is l_dest=0  { }
+LDEST: ".w"          is l_dest=1  { }
+LDEST: ".z"          is l_dest=2  { }
+LDEST: ".zw"         is l_dest=3  { }
+LDEST: ".y"          is l_dest=4  { }
+LDEST: ".yw"         is l_dest=5  { }
+LDEST: ".yz"         is l_dest=6  { }
+LDEST: ".yzw"        is l_dest=7  { }
+LDEST: ".x"          is l_dest=8  { }
+LDEST: ".xw"         is l_dest=9  { }
+LDEST: ".xz"         is l_dest=10 { }
+LDEST: ".xzw"        is l_dest=11 { }
+LDEST: ".xy"         is l_dest=12 { }
+LDEST: ".xyw"        is l_dest=13 { }
+LDEST: ".xyz"        is l_dest=14 { }
+LDEST: ".xyzw"       is l_dest=15 { }
+
+# Byte offset of the single field selected by dest (ILW, ILWR)
+LFOFF: is l_dest=8 { export 0:4; }
+LFOFF: is l_dest=4 { export 4:4; }
+LFOFF: is l_dest=2 { export 8:4; }
+LFOFF: is l_dest=1 { export 12:4; }
+
+lFSx: is l_fs=0   { export 0:4; }
+lFSx: is l_fsx    { export l_fsx; }
+lFSy: is l_fs=0   { export 0:4; }
+lFSy: is l_fsy    { export l_fsy; }
+lFSz: is l_fs=0   { export 0:4; }
+lFSz: is l_fsz    { export l_fsz; }
+lFSw: is l_fs=0   { export 0x3F800000:4; }
+lFSw: is l_fsw    { export l_fsw; }
+lFTx: is l_ft=0   { export 0:4; }
+lFTx: is l_ftx    { export l_ftx; }
+lFTy: is l_ft=0   { export 0:4; }
+lFTy: is l_fty    { export l_fty; }
+lFTz: is l_ft=0   { export 0:4; }
+lFTz: is l_ftz    { export l_ftz; }
+lFTw: is l_ft=0   { export 0x3F800000:4; }
+lFTw: is l_ftw    { export l_ftw; }
+
+# fs.fsf / ft.ftf (DIV, SQRT, RSQRT, MTIR, RINIT, RXOR, ESQRT, ...)
+lFSF: l_fs^".x"      is l_fsf=0 & l_fs & lFSx { export lFSx; }
+lFSF: l_fs^".y"      is l_fsf=1 & l_fs & lFSy { export lFSy; }
+lFSF: l_fs^".z"      is l_fsf=2 & l_fs & lFSz { export lFSz; }
+lFSF: l_fs^".w"      is l_fsf=3 & l_fs & lFSw { export lFSw; }
+lFTF: l_ft^".x"      is l_ftf=0 & l_ft & lFTx { export lFTx; }
+lFTF: l_ft^".y"      is l_ftf=1 & l_ft & lFTy { export lFTy; }
+lFTF: l_ft^".z"      is l_ftf=2 & l_ft & lFTz { export lFTz; }
+lFTF: l_ft^".w"      is l_ftf=3 & l_ft & lFTw { export lFTw; }
+
+# Integer register reads (vi0 = 0) and writes. The register fields are 5 bits wide but only
+# vi0..vi15 exist: a set high bit does not decode.
+lISr: l_is           is l_ishi=0 & l_is & l_is=0 { export 0:2; }
+lISr: l_is           is l_ishi=0 & l_is   { export l_is; }
+lITr: l_it           is l_ithi=0 & l_it & l_it=0 { export 0:2; }
+lITr: l_it           is l_ithi=0 & l_it   { export l_it; }
+lISw: l_is           is l_ishi=0 & l_is   { export l_is; }
+lITw: l_it           is l_ithi=0 & l_it   { export l_it; }
+lIDw: l_id           is l_idhi=0 & l_id   { export l_id; }
+
+# IADDIU/ISUBIU 15-bit immediate: dest bits (24..21) are the high 4 bits
+IMM15: val           is l_imm15hi & l_imm11u [ val = (l_imm15hi << 11) | l_imm11u; ] { export *[const]:2 val; }
+# FSxxx 12-bit immediate: bit 21 is bit 11
+IMM12: val           is l_imm12hi & l_imm11u [ val = (l_imm12hi << 11) | l_imm11u; ] { export *[const]:4 val; }
+
+# Branch target: imm11 LIWs from the next LIW
+BTGT: tgt            is l_imm11 [ tgt = inst_next + l_imm11 * 8; ] { export *[micro]:4 tgt; }
+# BAL/JALR link value: address of the LIW after the delay slot, in LIW units
+RETV: ra             is l_op7 [ ra = (inst_next + 8) >> 3; ] { export *[const]:2 ra; }
+
+@include "ps2vu_lower.sinc"
+
+# ---------------------------------------------------------------------------------------------
+# Lower half of the LIW: a lower instruction, or LOI (I bit set: the lower word is a float
+# immediate loaded into I after the upper instruction has read I).
+
+LOWERPART: "||" LNB          is u_ibit=0 & LNB { build LNB; }
+LOWERPART: "||" LBR          is u_ibit=0 & u_ebit=0 & LBR { build LBR; }
+LOWERPART: "|| loi" l_word   is u_ibit=1 & l_word { I = l_word; }
+
+@include "ps2vu_upper.sinc"

@@ -1,0 +1,1243 @@
+# ###
+# IP: GHIDRA
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ###
+
+
+#
+# PlayStation 2 Vector Unit, micro mode: upper (FMAC) instructions.
+#
+# Every 64-bit LIW is one Ghidra instruction; the root constructors below are the upper
+# instructions (so the upper mnemonic is the instruction mnemonic) and LOWERPART prints and
+# executes the lower half (or LOI when the I bit is set). LFLOW holds the control flow of the
+# lower half (branches, delay slots, E bit) so that it runs after the upper results are written.
+#
+# P-code order inside one LIW:
+#   1. the upper sources are read into temporaries (the upper reads the pre-LIW state);
+#   2. LOWERPART runs (it also reads the pre-LIW state of everything the upper writes);
+#   3. the upper results are written, field by field, under the dest mask (an upper result
+#      therefore wins when both halves write the same register);
+#   4. LFLOW: branch / E-bit delay slot and transfer.
+# The dest mask is tested with constant conditional branches (`if (u_dx == 0) goto ...`);
+# the decompiler folds them away, so only the written fields remain.
+#
+# Encoding (upper word = bits 63..32 of the LIW, at address + 4):
+#   I E M D T 00 dest(4) ft(5) fs(5) fd(5) op(6)
+#   op 0x3C..0x3F selects the second table, index = fd * 4 + (op & 3).
+
+
+:vadd^UBC^UDEST^UFLAGS u_fd, u_fs, uFTbc LOWERPART
+	is u_op4=0 & UBC & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & uFTbc
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = uFTbc;
+	local rx:4 = sx f+ t;
+	local ry:4 = sy f+ t;
+	local rz:4 = sz f+ t;
+	local rw:4 = sw f+ t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vsub^UBC^UDEST^UFLAGS u_fd, u_fs, uFTbc LOWERPART
+	is u_op4=1 & UBC & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & uFTbc
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = uFTbc;
+	local rx:4 = sx f- t;
+	local ry:4 = sy f- t;
+	local rz:4 = sz f- t;
+	local rw:4 = sw f- t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmadd^UBC^UDEST^UFLAGS u_fd, u_fs, uFTbc LOWERPART
+	is u_op4=2 & UBC & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & uFTbc
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = uFTbc;
+	local rx:4 = ACCx f+ (sx f* t);
+	local ry:4 = ACCy f+ (sy f* t);
+	local rz:4 = ACCz f+ (sz f* t);
+	local rw:4 = ACCw f+ (sw f* t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmsub^UBC^UDEST^UFLAGS u_fd, u_fs, uFTbc LOWERPART
+	is u_op4=3 & UBC & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & uFTbc
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = uFTbc;
+	local rx:4 = ACCx f- (sx f* t);
+	local ry:4 = ACCy f- (sy f* t);
+	local rz:4 = ACCz f- (sz f* t);
+	local rw:4 = ACCw f- (sw f* t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmax^UBC^UDEST^UFLAGS u_fd, u_fs, uFTbc LOWERPART
+	is u_op4=4 & UBC & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & uFTbc
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = uFTbc;
+	local rx:4 = vu_max(sx, t);
+	local ry:4 = vu_max(sy, t);
+	local rz:4 = vu_max(sz, t);
+	local rw:4 = vu_max(sw, t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmini^UBC^UDEST^UFLAGS u_fd, u_fs, uFTbc LOWERPART
+	is u_op4=5 & UBC & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & uFTbc
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = uFTbc;
+	local rx:4 = vu_mini(sx, t);
+	local ry:4 = vu_mini(sy, t);
+	local rz:4 = vu_mini(sz, t);
+	local rw:4 = vu_mini(sw, t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmul^UBC^UDEST^UFLAGS u_fd, u_fs, uFTbc LOWERPART
+	is u_op4=6 & UBC & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & uFTbc
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = uFTbc;
+	local rx:4 = sx f* t;
+	local ry:4 = sy f* t;
+	local rz:4 = sz f* t;
+	local rw:4 = sw f* t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmulq^UDEST^UFLAGS u_fd, u_fs, "Q" LOWERPART
+	is u_op6=0x1c & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = Q;
+	local rx:4 = sx f* t;
+	local ry:4 = sy f* t;
+	local rz:4 = sz f* t;
+	local rw:4 = sw f* t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmaxi^UDEST^UFLAGS u_fd, u_fs, "I" LOWERPART
+	is u_op6=0x1d & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = I;
+	local rx:4 = vu_max(sx, t);
+	local ry:4 = vu_max(sy, t);
+	local rz:4 = vu_max(sz, t);
+	local rw:4 = vu_max(sw, t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmuli^UDEST^UFLAGS u_fd, u_fs, "I" LOWERPART
+	is u_op6=0x1e & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = I;
+	local rx:4 = sx f* t;
+	local ry:4 = sy f* t;
+	local rz:4 = sz f* t;
+	local rw:4 = sw f* t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vminii^UDEST^UFLAGS u_fd, u_fs, "I" LOWERPART
+	is u_op6=0x1f & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = I;
+	local rx:4 = vu_mini(sx, t);
+	local ry:4 = vu_mini(sy, t);
+	local rz:4 = vu_mini(sz, t);
+	local rw:4 = vu_mini(sw, t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vaddq^UDEST^UFLAGS u_fd, u_fs, "Q" LOWERPART
+	is u_op6=0x20 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = Q;
+	local rx:4 = sx f+ t;
+	local ry:4 = sy f+ t;
+	local rz:4 = sz f+ t;
+	local rw:4 = sw f+ t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmaddq^UDEST^UFLAGS u_fd, u_fs, "Q" LOWERPART
+	is u_op6=0x21 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = Q;
+	local rx:4 = ACCx f+ (sx f* t);
+	local ry:4 = ACCy f+ (sy f* t);
+	local rz:4 = ACCz f+ (sz f* t);
+	local rw:4 = ACCw f+ (sw f* t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vaddi^UDEST^UFLAGS u_fd, u_fs, "I" LOWERPART
+	is u_op6=0x22 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = I;
+	local rx:4 = sx f+ t;
+	local ry:4 = sy f+ t;
+	local rz:4 = sz f+ t;
+	local rw:4 = sw f+ t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmaddi^UDEST^UFLAGS u_fd, u_fs, "I" LOWERPART
+	is u_op6=0x23 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = I;
+	local rx:4 = ACCx f+ (sx f* t);
+	local ry:4 = ACCy f+ (sy f* t);
+	local rz:4 = ACCz f+ (sz f* t);
+	local rw:4 = ACCw f+ (sw f* t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vsubq^UDEST^UFLAGS u_fd, u_fs, "Q" LOWERPART
+	is u_op6=0x24 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = Q;
+	local rx:4 = sx f- t;
+	local ry:4 = sy f- t;
+	local rz:4 = sz f- t;
+	local rw:4 = sw f- t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmsubq^UDEST^UFLAGS u_fd, u_fs, "Q" LOWERPART
+	is u_op6=0x25 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = Q;
+	local rx:4 = ACCx f- (sx f* t);
+	local ry:4 = ACCy f- (sy f* t);
+	local rz:4 = ACCz f- (sz f* t);
+	local rw:4 = ACCw f- (sw f* t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vsubi^UDEST^UFLAGS u_fd, u_fs, "I" LOWERPART
+	is u_op6=0x26 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = I;
+	local rx:4 = sx f- t;
+	local ry:4 = sy f- t;
+	local rz:4 = sz f- t;
+	local rw:4 = sw f- t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmsubi^UDEST^UFLAGS u_fd, u_fs, "I" LOWERPART
+	is u_op6=0x27 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = I;
+	local rx:4 = ACCx f- (sx f* t);
+	local ry:4 = ACCy f- (sy f* t);
+	local rz:4 = ACCz f- (sz f* t);
+	local rw:4 = ACCw f- (sw f* t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vadd^UDEST^UFLAGS u_fd, u_fs, u_ft LOWERPART
+	is u_op6=0x28 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = sx f+ tx;
+	local ry:4 = sy f+ ty;
+	local rz:4 = sz f+ tz;
+	local rw:4 = sw f+ tw;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmadd^UDEST^UFLAGS u_fd, u_fs, u_ft LOWERPART
+	is u_op6=0x29 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = ACCx f+ (sx f* tx);
+	local ry:4 = ACCy f+ (sy f* ty);
+	local rz:4 = ACCz f+ (sz f* tz);
+	local rw:4 = ACCw f+ (sw f* tw);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmul^UDEST^UFLAGS u_fd, u_fs, u_ft LOWERPART
+	is u_op6=0x2a & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = sx f* tx;
+	local ry:4 = sy f* ty;
+	local rz:4 = sz f* tz;
+	local rw:4 = sw f* tw;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmax^UDEST^UFLAGS u_fd, u_fs, u_ft LOWERPART
+	is u_op6=0x2b & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = vu_max(sx, tx);
+	local ry:4 = vu_max(sy, ty);
+	local rz:4 = vu_max(sz, tz);
+	local rw:4 = vu_max(sw, tw);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vsub^UDEST^UFLAGS u_fd, u_fs, u_ft LOWERPART
+	is u_op6=0x2c & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = sx f- tx;
+	local ry:4 = sy f- ty;
+	local rz:4 = sz f- tz;
+	local rw:4 = sw f- tw;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmsub^UDEST^UFLAGS u_fd, u_fs, u_ft LOWERPART
+	is u_op6=0x2d & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = ACCx f- (sx f* tx);
+	local ry:4 = ACCy f- (sy f* ty);
+	local rz:4 = ACCz f- (sz f* tz);
+	local rw:4 = ACCw f- (sw f* tw);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vmini^UDEST^UFLAGS u_fd, u_fs, u_ft LOWERPART
+	is u_op6=0x2f & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = vu_mini(sx, tx);
+	local ry:4 = vu_mini(sy, ty);
+	local rz:4 = vu_mini(sz, tz);
+	local rw:4 = vu_mini(sw, tw);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+:vopmsub^UDEST^UFLAGS u_fd, u_fs, u_ft LOWERPART
+	is u_op6=0x2E & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fd & u_fdx & u_fdy & u_fdz & u_fdw & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = ACCx f- (sy f* tz);
+	local ry:4 = ACCy f- (sz f* tx);
+	local rz:4 = ACCz f- (sx f* ty);
+	local rw:4 = u_fdw;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_fdx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fdy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_fdz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_fdw = rw; <ww>
+	build LFLOW;
+}
+
+
+# Second table (op 0x3C..0x3F): index = fd * 4 + (op & 3); u_sp = fd, u_bc = op & 3
+
+
+:vadda^UBC^UDEST^UFLAGS "ACC", u_fs, uFTbc LOWERPART
+	is u_op4=0xF & u_sp=0 & UBC & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw & uFTbc
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = uFTbc;
+	local rx:4 = sx f+ t;
+	local ry:4 = sy f+ t;
+	local rz:4 = sz f+ t;
+	local rw:4 = sw f+ t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vsuba^UBC^UDEST^UFLAGS "ACC", u_fs, uFTbc LOWERPART
+	is u_op4=0xF & u_sp=1 & UBC & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw & uFTbc
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = uFTbc;
+	local rx:4 = sx f- t;
+	local ry:4 = sy f- t;
+	local rz:4 = sz f- t;
+	local rw:4 = sw f- t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vmadda^UBC^UDEST^UFLAGS "ACC", u_fs, uFTbc LOWERPART
+	is u_op4=0xF & u_sp=2 & UBC & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw & uFTbc
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = uFTbc;
+	local rx:4 = ACCx f+ (sx f* t);
+	local ry:4 = ACCy f+ (sy f* t);
+	local rz:4 = ACCz f+ (sz f* t);
+	local rw:4 = ACCw f+ (sw f* t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vmsuba^UBC^UDEST^UFLAGS "ACC", u_fs, uFTbc LOWERPART
+	is u_op4=0xF & u_sp=3 & UBC & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw & uFTbc
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = uFTbc;
+	local rx:4 = ACCx f- (sx f* t);
+	local ry:4 = ACCy f- (sy f* t);
+	local rz:4 = ACCz f- (sz f* t);
+	local rw:4 = ACCw f- (sw f* t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vmula^UBC^UDEST^UFLAGS "ACC", u_fs, uFTbc LOWERPART
+	is u_op4=0xF & u_sp=6 & UBC & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw & uFTbc
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = uFTbc;
+	local rx:4 = sx f* t;
+	local ry:4 = sy f* t;
+	local rz:4 = sz f* t;
+	local rw:4 = sw f* t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vitof0^UDEST^UFLAGS u_ft, u_fs LOWERPART
+	is u_op4=0xF & u_sp=4 & u_bc=0 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_ft & u_ftx & u_fty & u_ftz & u_ftw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local rx:4 = int2float(sx);
+	local ry:4 = int2float(sy);
+	local rz:4 = int2float(sz);
+	local rw:4 = int2float(sw);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_ftx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fty = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_ftz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_ftw = rw; <ww>
+	build LFLOW;
+}
+
+:vitof4^UDEST^UFLAGS u_ft, u_fs LOWERPART
+	is u_op4=0xF & u_sp=4 & u_bc=1 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_ft & u_ftx & u_fty & u_ftz & u_ftw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local rx:4 = int2float(sx) f/ int2float(16:4);
+	local ry:4 = int2float(sy) f/ int2float(16:4);
+	local rz:4 = int2float(sz) f/ int2float(16:4);
+	local rw:4 = int2float(sw) f/ int2float(16:4);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_ftx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fty = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_ftz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_ftw = rw; <ww>
+	build LFLOW;
+}
+
+:vitof12^UDEST^UFLAGS u_ft, u_fs LOWERPART
+	is u_op4=0xF & u_sp=4 & u_bc=2 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_ft & u_ftx & u_fty & u_ftz & u_ftw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local rx:4 = int2float(sx) f/ int2float(4096:4);
+	local ry:4 = int2float(sy) f/ int2float(4096:4);
+	local rz:4 = int2float(sz) f/ int2float(4096:4);
+	local rw:4 = int2float(sw) f/ int2float(4096:4);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_ftx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fty = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_ftz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_ftw = rw; <ww>
+	build LFLOW;
+}
+
+:vitof15^UDEST^UFLAGS u_ft, u_fs LOWERPART
+	is u_op4=0xF & u_sp=4 & u_bc=3 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_ft & u_ftx & u_fty & u_ftz & u_ftw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local rx:4 = int2float(sx) f/ int2float(32768:4);
+	local ry:4 = int2float(sy) f/ int2float(32768:4);
+	local rz:4 = int2float(sz) f/ int2float(32768:4);
+	local rw:4 = int2float(sw) f/ int2float(32768:4);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_ftx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fty = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_ftz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_ftw = rw; <ww>
+	build LFLOW;
+}
+
+:vftoi0^UDEST^UFLAGS u_ft, u_fs LOWERPART
+	is u_op4=0xF & u_sp=5 & u_bc=0 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_ft & u_ftx & u_fty & u_ftz & u_ftw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local rx:4 = trunc(sx);
+	local ry:4 = trunc(sy);
+	local rz:4 = trunc(sz);
+	local rw:4 = trunc(sw);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_ftx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fty = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_ftz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_ftw = rw; <ww>
+	build LFLOW;
+}
+
+:vftoi4^UDEST^UFLAGS u_ft, u_fs LOWERPART
+	is u_op4=0xF & u_sp=5 & u_bc=1 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_ft & u_ftx & u_fty & u_ftz & u_ftw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local rx:4 = trunc(sx f* int2float(16:4));
+	local ry:4 = trunc(sy f* int2float(16:4));
+	local rz:4 = trunc(sz f* int2float(16:4));
+	local rw:4 = trunc(sw f* int2float(16:4));
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_ftx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fty = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_ftz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_ftw = rw; <ww>
+	build LFLOW;
+}
+
+:vftoi12^UDEST^UFLAGS u_ft, u_fs LOWERPART
+	is u_op4=0xF & u_sp=5 & u_bc=2 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_ft & u_ftx & u_fty & u_ftz & u_ftw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local rx:4 = trunc(sx f* int2float(4096:4));
+	local ry:4 = trunc(sy f* int2float(4096:4));
+	local rz:4 = trunc(sz f* int2float(4096:4));
+	local rw:4 = trunc(sw f* int2float(4096:4));
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_ftx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fty = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_ftz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_ftw = rw; <ww>
+	build LFLOW;
+}
+
+:vftoi15^UDEST^UFLAGS u_ft, u_fs LOWERPART
+	is u_op4=0xF & u_sp=5 & u_bc=3 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_ft & u_ftx & u_fty & u_ftz & u_ftw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local rx:4 = trunc(sx f* int2float(32768:4));
+	local ry:4 = trunc(sy f* int2float(32768:4));
+	local rz:4 = trunc(sz f* int2float(32768:4));
+	local rw:4 = trunc(sw f* int2float(32768:4));
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_ftx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fty = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_ftz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_ftw = rw; <ww>
+	build LFLOW;
+}
+
+:vmulaq^UDEST^UFLAGS "ACC", u_fs, "Q" LOWERPART
+	is u_op4=0xF & u_sp=7 & u_bc=0 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = Q;
+	local rx:4 = sx f* t;
+	local ry:4 = sy f* t;
+	local rz:4 = sz f* t;
+	local rw:4 = sw f* t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vmulai^UDEST^UFLAGS "ACC", u_fs, "I" LOWERPART
+	is u_op4=0xF & u_sp=7 & u_bc=2 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = I;
+	local rx:4 = sx f* t;
+	local ry:4 = sy f* t;
+	local rz:4 = sz f* t;
+	local rw:4 = sw f* t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vaddaq^UDEST^UFLAGS "ACC", u_fs, "Q" LOWERPART
+	is u_op4=0xF & u_sp=8 & u_bc=0 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = Q;
+	local rx:4 = sx f+ t;
+	local ry:4 = sy f+ t;
+	local rz:4 = sz f+ t;
+	local rw:4 = sw f+ t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vmaddaq^UDEST^UFLAGS "ACC", u_fs, "Q" LOWERPART
+	is u_op4=0xF & u_sp=8 & u_bc=1 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = Q;
+	local rx:4 = ACCx f+ (sx f* t);
+	local ry:4 = ACCy f+ (sy f* t);
+	local rz:4 = ACCz f+ (sz f* t);
+	local rw:4 = ACCw f+ (sw f* t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vaddai^UDEST^UFLAGS "ACC", u_fs, "I" LOWERPART
+	is u_op4=0xF & u_sp=8 & u_bc=2 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = I;
+	local rx:4 = sx f+ t;
+	local ry:4 = sy f+ t;
+	local rz:4 = sz f+ t;
+	local rw:4 = sw f+ t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vmaddai^UDEST^UFLAGS "ACC", u_fs, "I" LOWERPART
+	is u_op4=0xF & u_sp=8 & u_bc=3 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = I;
+	local rx:4 = ACCx f+ (sx f* t);
+	local ry:4 = ACCy f+ (sy f* t);
+	local rz:4 = ACCz f+ (sz f* t);
+	local rw:4 = ACCw f+ (sw f* t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vsubaq^UDEST^UFLAGS "ACC", u_fs, "Q" LOWERPART
+	is u_op4=0xF & u_sp=9 & u_bc=0 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = Q;
+	local rx:4 = sx f- t;
+	local ry:4 = sy f- t;
+	local rz:4 = sz f- t;
+	local rw:4 = sw f- t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vmsubaq^UDEST^UFLAGS "ACC", u_fs, "Q" LOWERPART
+	is u_op4=0xF & u_sp=9 & u_bc=1 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = Q;
+	local rx:4 = ACCx f- (sx f* t);
+	local ry:4 = ACCy f- (sy f* t);
+	local rz:4 = ACCz f- (sz f* t);
+	local rw:4 = ACCw f- (sw f* t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vsubai^UDEST^UFLAGS "ACC", u_fs, "I" LOWERPART
+	is u_op4=0xF & u_sp=9 & u_bc=2 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = I;
+	local rx:4 = sx f- t;
+	local ry:4 = sy f- t;
+	local rz:4 = sz f- t;
+	local rw:4 = sw f- t;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vmsubai^UDEST^UFLAGS "ACC", u_fs, "I" LOWERPART
+	is u_op4=0xF & u_sp=9 & u_bc=3 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local t:4 = I;
+	local rx:4 = ACCx f- (sx f* t);
+	local ry:4 = ACCy f- (sy f* t);
+	local rz:4 = ACCz f- (sz f* t);
+	local rw:4 = ACCw f- (sw f* t);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vabs^UDEST^UFLAGS u_ft, u_fs LOWERPART
+	is u_op4=0xF & u_sp=7 & u_bc=1 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_ft & u_ftx & u_fty & u_ftz & u_ftw & u_fs & uFSx & uFSy & uFSz & uFSw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local rx:4 = abs(sx);
+	local ry:4 = abs(sy);
+	local rz:4 = abs(sz);
+	local rw:4 = abs(sw);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; u_ftx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; u_fty = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; u_ftz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; u_ftw = rw; <ww>
+	build LFLOW;
+}
+
+:vclipw^UDEST^UFLAGS u_fs, u_ft^"w" LOWERPART
+	is u_op4=0xF & u_sp=7 & u_bc=3 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & u_ft & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local pw:4 = abs(uFTw);
+	local nw:4 = f- pw;
+	local j0:4 = zext(pw f< sx);
+	local j1:4 = zext(sx f< nw);
+	local j2:4 = zext(pw f< sy);
+	local j3:4 = zext(sy f< nw);
+	local j4:4 = zext(pw f< sz);
+	local j5:4 = zext(sz f< nw);
+	local judge:4 = j0 | (j1 << 1) | (j2 << 2) | (j3 << 3) | (j4 << 4) | (j5 << 5);
+	local newclip:4 = ((clip_flag << 6) | judge) & 0xFFFFFF;
+	build LOWERPART;
+	clip_flag = newclip;
+	build LFLOW;
+}
+
+:vadda^UDEST^UFLAGS "ACC", u_fs, u_ft LOWERPART
+	is u_op4=0xF & u_sp=10 & u_bc=0 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = sx f+ tx;
+	local ry:4 = sy f+ ty;
+	local rz:4 = sz f+ tz;
+	local rw:4 = sw f+ tw;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vmadda^UDEST^UFLAGS "ACC", u_fs, u_ft LOWERPART
+	is u_op4=0xF & u_sp=10 & u_bc=1 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = ACCx f+ (sx f* tx);
+	local ry:4 = ACCy f+ (sy f* ty);
+	local rz:4 = ACCz f+ (sz f* tz);
+	local rw:4 = ACCw f+ (sw f* tw);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vmula^UDEST^UFLAGS "ACC", u_fs, u_ft LOWERPART
+	is u_op4=0xF & u_sp=10 & u_bc=2 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = sx f* tx;
+	local ry:4 = sy f* ty;
+	local rz:4 = sz f* tz;
+	local rw:4 = sw f* tw;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vsuba^UDEST^UFLAGS "ACC", u_fs, u_ft LOWERPART
+	is u_op4=0xF & u_sp=11 & u_bc=0 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = sx f- tx;
+	local ry:4 = sy f- ty;
+	local rz:4 = sz f- tz;
+	local rw:4 = sw f- tw;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vmsuba^UDEST^UFLAGS "ACC", u_fs, u_ft LOWERPART
+	is u_op4=0xF & u_sp=11 & u_bc=1 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = ACCx f- (sx f* tx);
+	local ry:4 = ACCy f- (sy f* ty);
+	local rz:4 = ACCz f- (sz f* tz);
+	local rw:4 = ACCw f- (sw f* tw);
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vopmula^UDEST^UFLAGS "ACC", u_fs, u_ft LOWERPART
+	is u_op4=0xF & u_sp=0xB & u_bc=2 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW & u_fs & uFSx & uFSy & uFSz & uFSw & u_ft & uFTx & uFTy & uFTz & uFTw
+{
+	local sx:4 = uFSx;
+	local sy:4 = uFSy;
+	local sz:4 = uFSz;
+	local sw:4 = uFSw;
+	local tx:4 = uFTx;
+	local ty:4 = uFTy;
+	local tz:4 = uFTz;
+	local tw:4 = uFTw;
+	local rx:4 = sy f* tz;
+	local ry:4 = sz f* tx;
+	local rz:4 = sx f* ty;
+	local rw:4 = ACCw;
+	build LOWERPART;
+	if (u_dx == 0:1) goto <wx>; ACCx = rx; <wx>
+	if (u_dy == 0:1) goto <wy>; ACCy = ry; <wy>
+	if (u_dz == 0:1) goto <wz>; ACCz = rz; <wz>
+	if (u_dw == 0:1) goto <ww>; ACCw = rw; <ww>
+	build LFLOW;
+}
+
+:vnop^UFLAGS LOWERPART
+	is u_op4=0xF & u_sp=0xB & u_bc=3 & u_zero=0 & UDEST & UFLAGS & u_dx & u_dy & u_dz & u_dw & LOWERPART & LFLOW
+{
+	build LOWERPART;
+	build LFLOW;
+}
