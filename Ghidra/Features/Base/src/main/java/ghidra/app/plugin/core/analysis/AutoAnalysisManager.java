@@ -53,6 +53,7 @@ import ghidra.util.datastruct.WeakSet;
 import ghidra.util.exception.AssertException;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.*;
+import ghidra.util.telemetry.Telemetry;
 
 /**
  * AutoAnalysisPlugin
@@ -656,7 +657,8 @@ public class AutoAnalysisManager {
 
 		void run(Program p, TaskMonitor monitor) {
 			startTime = System.currentTimeMillis();
-			try {
+			try (Telemetry.Activity a = Telemetry.begin("analyzer", task.getName(),
+				() -> queue.size() + " queued", true)) {
 				task.applyTo(p, monitor);
 			}
 			catch (RuntimeException th) {

@@ -57,6 +57,7 @@ import ghidra.util.*;
 import ghidra.util.classfinder.ClassSearcher;
 import ghidra.util.exception.*;
 import ghidra.util.task.TaskMonitor;
+import ghidra.util.telemetry.Telemetry;
 import utilities.util.FileUtilities;
 
 /**
@@ -579,10 +580,14 @@ public class HeadlessAnalyzer {
 
 		try {
 			Msg.info(this, "SCRIPT: " + scriptName);
+			Telemetry.phase("script " + script.getScriptName());
 
 			// Execute the script, but don't directly write to stdout or stderr. The headless
 			// analyzer only uses the logging mechanism to get output to the user.
-			script.execute(scriptState, ScriptControls.NONE);
+			// With telemetry on, the script's monitor reports its message and progress.
+			script.execute(scriptState, Telemetry.ENABLED
+					? new ScriptControls(null, null, false, Telemetry.monitor())
+					: ScriptControls.NONE);
 		}
 		catch (Exception exc) {
 			String logErrorMsg = "REPORT SCRIPT ERROR: ";
@@ -1042,6 +1047,7 @@ public class HeadlessAnalyzer {
 		try {
 			if (options.analyze) {
 				Msg.info(this, "ANALYZING all memory and code: " + fileAbsolutePath);
+				Telemetry.phase("analysis " + program.getName());
 				mgr.initializeOptions();
 
 				// Note: Want to analyze regardless of whether we have already analyzed or not
@@ -1049,7 +1055,7 @@ public class HeadlessAnalyzer {
 				mgr.reAnalyzeAll(null);
 
 				if (options.perFileTimeout == -1) {
-					mgr.startAnalysis(TaskMonitor.DUMMY); // kick start
+					mgr.startAnalysis(Telemetry.monitor()); // kick start (DUMMY without telemetry)
 
 					Msg.info(this, "REPORT: Analysis succeeded for file: " + fileAbsolutePath);
 					GhidraProgramUtilities.markProgramAnalyzed(program);
@@ -1120,6 +1126,7 @@ public class HeadlessAnalyzer {
 			}
 			else if (options.analyze && !options.postScripts.isEmpty()) {
 				Msg.info(this, "ANALYZING changes made by post scripts: " + fileAbsolutePath);
+				Telemetry.phase("post-analysis " + program.getName());
 				txId = program.startTransaction("Post-Analysis");
 				try {
 					mgr.startAnalysis(TaskMonitor.DUMMY); // kick start
@@ -1547,6 +1554,7 @@ public class HeadlessAnalyzer {
 	private boolean processFileWithImport(FSRL fsrl, String folderPath) {
 
 		Msg.info(this, "IMPORTING: " + fsrl);
+		Telemetry.phase("import " + fsrl.getName());
 
 		// Perform the load.
 		// Note that loading 1 file may result in more than 1 thing getting loaded.

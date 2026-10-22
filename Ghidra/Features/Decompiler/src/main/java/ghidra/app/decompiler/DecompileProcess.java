@@ -131,6 +131,14 @@ public class DecompileProcess {
 		return disposestate;
 	}
 
+	/**
+	 * @return the process id of the native decompiler, or -1 if it is not running
+	 */
+	public long getNativePid() {
+		Process p = nativeProcess;
+		return p != null && p.isAlive() ? p.pid() : -1;
+	}
+
 	private void setup() throws IOException {
 		if (disposestate != DisposeState.NOT_DISPOSED) {
 			throw new IOException("Decompiler has been disposed");

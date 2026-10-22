@@ -37,6 +37,7 @@ import ghidra.program.model.symbol.NameTransformer;
 import ghidra.util.Msg;
 import ghidra.util.task.CancelledListener;
 import ghidra.util.task.TaskMonitor;
+import ghidra.util.telemetry.Telemetry;
 
 /**
  * This is a self-contained interface to a single decompile
@@ -789,7 +790,9 @@ public class DecompInterface {
 		}
 
 		Decoder decoder = null;
-		try {
+		long cpuAtStart = Telemetry.ENABLED ? nativeCpuMillis() : 0;
+		try (Telemetry.Activity a = Telemetry.begin("decompile",
+			func.getName() + " @ " + func.getEntryPoint(), () -> nativeCpu(cpuAtStart), false)) {
 			Address funcEntry = func.getEntryPoint();
 			if (debug != null) {
 				debug.setFunction(func);
@@ -838,6 +841,32 @@ public class DecompInterface {
 
 		return new DecompileResults(func, pcodelanguage, compilerSpec, dtmanage, decompileMessage,
 			decoder, processState);
+	}
+
+	/** Telemetry: the native decompiler's total CPU time in ms, or 0 if not running */
+	private long nativeCpuMillis() {
+		DecompileProcess process = decompProcess;
+		long pid = process != null ? process.getNativePid() : -1;
+		if (pid < 0) {
+			return 0;
+		}
+		return ProcessHandle.of(pid)
+				.flatMap(h -> h.info().totalCpuDuration())
+				.map(d -> d.toMillis())
+				.orElse(0L);
+	}
+
+	/** Telemetry: the native decompiler's process id and the CPU it used for this function */
+	private String nativeCpu(long cpuAtStart) {
+		DecompileProcess process = decompProcess;
+		long pid = process != null ? process.getNativePid() : -1;
+		if (pid < 0) {
+			return "no decompiler process";
+		}
+		long cpu = nativeCpuMillis();
+		// a restarted process starts again from 0
+		long used = cpu >= cpuAtStart ? cpu - cpuAtStart : cpu;
+		return "decompiler pid " + pid + " cpu " + used / 1000 + " s";
 	}
 
 	/**
