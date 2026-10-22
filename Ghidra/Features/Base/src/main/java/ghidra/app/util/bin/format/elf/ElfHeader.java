@@ -1540,7 +1540,7 @@ public class ElfHeader implements StructConverter {
 	 * @return true if this is a shared object file
 	 */
 	public boolean isSharedObject() {
-		return e_type == ElfConstants.ET_DYN;
+		return e_type == ElfConstants.ET_DYN || getPs4FileType() == PS4_SHARED;
 	}
 
 	/**
@@ -1550,7 +1550,62 @@ public class ElfHeader implements StructConverter {
 	 * @return true if this is a executable file
 	 */
 	public boolean isExecutable() {
-		return e_type == ElfConstants.ET_EXEC;
+		return e_type == ElfConstants.ET_EXEC || getPs4FileType() == PS4_EXECUTABLE;
+	}
+
+	// PlayStation 4 / 5 file types (OS-specific e_type range, x86-64 only): executables
+	// (eboot.bin: ET_SCE_EXEC, ET_SCE_REPLAY_EXEC, ET_SCE_RELEXEC, ET_SCE_DYNEXEC) and libraries
+	// (.sprx: ET_SCE_DYNAMIC). Treated like ET_EXEC / ET_DYN so their segments, entry point and
+	// relocations load as for any executable.
+	public static final short ET_SCE_EXEC = (short) 0xFE00;
+	public static final short ET_SCE_REPLAY_EXEC = (short) 0xFE01;
+	public static final short ET_SCE_RELEXEC = (short) 0xFE04;
+	public static final short ET_SCE_STUBLIB = (short) 0xFE0C;
+	public static final short ET_SCE_DYNEXEC = (short) 0xFE10;
+	public static final short ET_SCE_DYNAMIC = (short) 0xFE18;
+	private static final int PS4_NONE = 0;
+	private static final int PS4_EXECUTABLE = 1;
+	private static final int PS4_SHARED = 2;
+
+	private int getPs4FileType() {
+		if (e_machine != ElfConstants.EM_X86_64) {
+			return PS4_NONE;
+		}
+		switch (e_type) {
+			case ET_SCE_EXEC:
+			case ET_SCE_REPLAY_EXEC:
+			case ET_SCE_RELEXEC:
+			case ET_SCE_DYNEXEC:
+				return PS4_EXECUTABLE;
+			case ET_SCE_DYNAMIC:
+			case ET_SCE_STUBLIB:
+				return PS4_SHARED;
+			default:
+				return PS4_NONE;
+		}
+	}
+
+	/**
+	 * @return a name for a PlayStation 4 file type, or null if this is not one
+	 */
+	public String getPs4FileTypeName() {
+		if (getPs4FileType() == PS4_NONE) {
+			return null;
+		}
+		switch (e_type) {
+			case ET_SCE_EXEC:
+				return "PS4 executable (ET_SCE_EXEC)";
+			case ET_SCE_REPLAY_EXEC:
+				return "PS4 executable (ET_SCE_REPLAY_EXEC)";
+			case ET_SCE_RELEXEC:
+				return "PS4 relocatable executable (ET_SCE_RELEXEC)";
+			case ET_SCE_DYNEXEC:
+				return "PS4 executable (ET_SCE_DYNEXEC)";
+			case ET_SCE_DYNAMIC:
+				return "PS4 shared library (ET_SCE_DYNAMIC)";
+			default:
+				return "PS4 stub library (ET_SCE_STUBLIB)";
+		}
 	}
 
 	/**
