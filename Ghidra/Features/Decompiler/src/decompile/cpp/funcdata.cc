@@ -160,6 +160,10 @@ void Funcdata::startProcessing(void)
   funcp.clearUnlockedOutput();
   Address baddr(baseaddr.getSpace(),0);
   Address eaddr(baseaddr.getSpace(),~((uintb)0));
+  if (!flowBegin.isInvalid() && flowBegin.getSpace() == baseaddr.getSpace()) {
+    baddr = flowBegin;
+    eaddr = flowEnd;
+  }
   followFlow(baddr,eaddr);
   structureReset();
   sortCallSpecs();		// Must come after structure reset

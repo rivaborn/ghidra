@@ -16,6 +16,8 @@
 #include "ghidra_process.hh"
 #include "flow.hh"
 #include "blockaction.hh"
+#include "statusreport.hh"
+#include <new>
 
 #ifdef _WINDOWS
 #include <fcntl.h>
@@ -146,6 +148,13 @@ int4 GhidraCommand::doit(void)
   }
   catch(LowlevelError &err) {
     errorMsg = "Low-level Error: " + err.explain;
+  }
+  catch(std::bad_alloc &err) {
+    // Report the failure for this function, then exit: the half-built function may hold most of
+    // the memory, and a fresh process (started by the Java side) takes the next function.
+    StatusReport::releaseReserve();	// room for the reply
+    errorMsg = "Out of memory: " + StatusReport::memoryText();
+    status = 1;
   }
   sendResult(errorMsg);
   sout.write("\000\000\001\007",4); // Command response closer
@@ -281,6 +290,15 @@ void DecompileAt::loadParameters(void)
   PackedDecode decoder(ghidra);
   ArchitectureGhidra::readStringStream(sin,decoder);	// Read encoded address directly from in stream
   addr = Address::decode(decoder); 		// Decode for functions address
+  // Optional: the function body's bounds; flow leaving them is not followed
+  flowBegin = Address();
+  flowEnd = Address();
+  if (decoder.peekElement() == ELEM_RANGE.getId()) {
+    Range range;
+    range.decode(decoder);
+    flowBegin = range.getFirstAddr();
+    flowEnd = range.getLastAddr();
+  }
 }
 
 void DecompileAt::rawAction(void) 
@@ -299,8 +317,22 @@ void DecompileAt::rawAction(void)
 #ifdef __REMOTE_SOCKET__
     connect_to_console(fd);
 #endif
-    ghidra->allacts.getCurrent()->reset( *fd );
-    ghidra->allacts.getCurrent()->perform( *fd );
+    if (!flowBegin.isInvalid())
+      fd->setFlowRange(flowBegin,flowEnd);
+    if (StatusReport::enabled) {
+      ostringstream a;
+      addr.printRaw(a);
+      StatusReport::beginFunction(fd->getName(),a.str());
+    }
+    try {
+      ghidra->allacts.getCurrent()->reset( *fd );
+      ghidra->allacts.getCurrent()->perform( *fd );
+    }
+    catch(...) {
+      StatusReport::endFunction();
+      throw;
+    }
+    StatusReport::endFunction();
   }
 
   sout.write("\000\000\001\016",4);
@@ -522,6 +554,7 @@ int main(int argc,char **argv)
   AttributeId::initialize();
   ElementId::initialize();
   CapabilityPoint::initializeAll();
+  StatusReport::initialize();	// GHIDRA_DECOMPILER_STATUS, GHIDRA_DECOMPILER_MAXMEM_MB
   int4 status = 0;
   while(status == 0) {
     status = GhidraCapability::readCommand(cin,cout);

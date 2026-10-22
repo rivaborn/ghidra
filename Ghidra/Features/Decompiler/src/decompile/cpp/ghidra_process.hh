@@ -158,6 +158,8 @@ public:
 /// control-flow structures, symbol information, etc., are sent back to the client.
 class DecompileAt : public GhidraCommand {
   Address addr;				///< The entry point address of the function to decompile
+  Address flowBegin;			///< First address flow may visit (invalid = no bound)
+  Address flowEnd;			///< Last address flow may visit
   virtual void loadParameters(void);
 public:
   virtual void rawAction(void);
