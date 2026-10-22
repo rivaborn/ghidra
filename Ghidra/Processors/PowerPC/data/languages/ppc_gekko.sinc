@@ -1,0 +1,841 @@
+# ###
+# IP: GHIDRA
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ###
+#
+# IBM Gekko (GameCube), Broadway (Wii) and Espresso (Wii U) paired-single extension
+# of the PowerPC 750CL. Included by ppc_common.sinc when GEKKO_PS is defined, before
+# ppc_instructions.sinc (see ppc_32_gekko_be.slaspec).
+#
+# Register model
+#   Each FPR holds two values, ps0 and ps1. ps0 is the ordinary FPR (f0..f31, a
+#   double). ps1 is modelled as a second double, ps1_f0..ps1_f31, placed in the
+#   otherwise unused low half of the VSX register that holds the FPR (offset of
+#   fN + 8). Paired-single arithmetic computes in double precision and rounds each
+#   result to single precision, the same way the stock fadds/fmuls do.
+#   Single-precision loads and arithmetic (lfs, fadds, frsp, ...) write the result
+#   into both halves (GEKKO_PS1_FILL below); double-precision instructions leave
+#   ps1 alone.
+#
+# Quantization registers
+#   GQR0..GQR7 are SPR 912..919 and HID2 is SPR 920 (named in ppc_32_gekko.pspec).
+#   GQR layout (bit 0 = LSB): LD_SCALE 24..29, LD_TYPE 16..18, ST_SCALE 8..13,
+#   ST_TYPE 0..2. Type 0 is float; 4 u8, 5 u16, 6 s8, 7 s16.
+#   psq_l/psq_st test the type at run time: type 0 gives ordinary single-precision
+#   loads and stores; any other type calls psqDequantize(ea, GQR) /
+#   psqQuantize(ea, GQR, value) for each element (element size 1 or 2 bytes).
+#   ppc_32_gekko.pspec tracks GQR0 = 0 (float), the value the SDK's OS init writes
+#   and the one compiled code assumes, so the decompiler folds the test away for
+#   qr0. Set GQR1..GQR7 with "Set Register Values" to fold the others.
+#
+# Not modelled: FPSCR exception bits (paired-single ops set FPRF from ps0 only),
+# the estimate precision of ps_res / ps_rsqrte (computed exactly), denormal
+# flushing, the locked-cache side of dcbz_l (a pcodeop like the stock dcbz).
+define register offset=0x4008 size=8 [
+	ps1_f0 _ ps1_f1 _ ps1_f2 _ ps1_f3 _ ps1_f4 _ ps1_f5 _ ps1_f6 _ ps1_f7 _ ps1_f8 _ ps1_f9 _ ps1_f10 _ ps1_f11 _ ps1_f12 _ ps1_f13 _ ps1_f14 _ ps1_f15 _
+	ps1_f16 _ ps1_f17 _ ps1_f18 _ ps1_f19 _ ps1_f20 _ ps1_f21 _ ps1_f22 _ ps1_f23 _ ps1_f24 _ ps1_f25 _ ps1_f26 _ ps1_f27 _ ps1_f28 _ ps1_f29 _ ps1_f30 _ ps1_f31 ];
+
+# ps1 half of the FPR named by each operand field (fD/fS, fA, fB, fC)
+ps1D: is Dp=0 { export ps1_f0; }
+ps1D: is Dp=1 { export ps1_f1; }
+ps1D: is Dp=2 { export ps1_f2; }
+ps1D: is Dp=3 { export ps1_f3; }
+ps1D: is Dp=4 { export ps1_f4; }
+ps1D: is Dp=5 { export ps1_f5; }
+ps1D: is Dp=6 { export ps1_f6; }
+ps1D: is Dp=7 { export ps1_f7; }
+ps1D: is Dp=8 { export ps1_f8; }
+ps1D: is Dp=9 { export ps1_f9; }
+ps1D: is Dp=10 { export ps1_f10; }
+ps1D: is Dp=11 { export ps1_f11; }
+ps1D: is Dp=12 { export ps1_f12; }
+ps1D: is Dp=13 { export ps1_f13; }
+ps1D: is Dp=14 { export ps1_f14; }
+ps1D: is Dp=15 { export ps1_f15; }
+ps1D: is Dp=16 { export ps1_f16; }
+ps1D: is Dp=17 { export ps1_f17; }
+ps1D: is Dp=18 { export ps1_f18; }
+ps1D: is Dp=19 { export ps1_f19; }
+ps1D: is Dp=20 { export ps1_f20; }
+ps1D: is Dp=21 { export ps1_f21; }
+ps1D: is Dp=22 { export ps1_f22; }
+ps1D: is Dp=23 { export ps1_f23; }
+ps1D: is Dp=24 { export ps1_f24; }
+ps1D: is Dp=25 { export ps1_f25; }
+ps1D: is Dp=26 { export ps1_f26; }
+ps1D: is Dp=27 { export ps1_f27; }
+ps1D: is Dp=28 { export ps1_f28; }
+ps1D: is Dp=29 { export ps1_f29; }
+ps1D: is Dp=30 { export ps1_f30; }
+ps1D: is Dp=31 { export ps1_f31; }
+
+ps1A: is A_BITS=0 { export ps1_f0; }
+ps1A: is A_BITS=1 { export ps1_f1; }
+ps1A: is A_BITS=2 { export ps1_f2; }
+ps1A: is A_BITS=3 { export ps1_f3; }
+ps1A: is A_BITS=4 { export ps1_f4; }
+ps1A: is A_BITS=5 { export ps1_f5; }
+ps1A: is A_BITS=6 { export ps1_f6; }
+ps1A: is A_BITS=7 { export ps1_f7; }
+ps1A: is A_BITS=8 { export ps1_f8; }
+ps1A: is A_BITS=9 { export ps1_f9; }
+ps1A: is A_BITS=10 { export ps1_f10; }
+ps1A: is A_BITS=11 { export ps1_f11; }
+ps1A: is A_BITS=12 { export ps1_f12; }
+ps1A: is A_BITS=13 { export ps1_f13; }
+ps1A: is A_BITS=14 { export ps1_f14; }
+ps1A: is A_BITS=15 { export ps1_f15; }
+ps1A: is A_BITS=16 { export ps1_f16; }
+ps1A: is A_BITS=17 { export ps1_f17; }
+ps1A: is A_BITS=18 { export ps1_f18; }
+ps1A: is A_BITS=19 { export ps1_f19; }
+ps1A: is A_BITS=20 { export ps1_f20; }
+ps1A: is A_BITS=21 { export ps1_f21; }
+ps1A: is A_BITS=22 { export ps1_f22; }
+ps1A: is A_BITS=23 { export ps1_f23; }
+ps1A: is A_BITS=24 { export ps1_f24; }
+ps1A: is A_BITS=25 { export ps1_f25; }
+ps1A: is A_BITS=26 { export ps1_f26; }
+ps1A: is A_BITS=27 { export ps1_f27; }
+ps1A: is A_BITS=28 { export ps1_f28; }
+ps1A: is A_BITS=29 { export ps1_f29; }
+ps1A: is A_BITS=30 { export ps1_f30; }
+ps1A: is A_BITS=31 { export ps1_f31; }
+
+ps1B: is B_BITS=0 { export ps1_f0; }
+ps1B: is B_BITS=1 { export ps1_f1; }
+ps1B: is B_BITS=2 { export ps1_f2; }
+ps1B: is B_BITS=3 { export ps1_f3; }
+ps1B: is B_BITS=4 { export ps1_f4; }
+ps1B: is B_BITS=5 { export ps1_f5; }
+ps1B: is B_BITS=6 { export ps1_f6; }
+ps1B: is B_BITS=7 { export ps1_f7; }
+ps1B: is B_BITS=8 { export ps1_f8; }
+ps1B: is B_BITS=9 { export ps1_f9; }
+ps1B: is B_BITS=10 { export ps1_f10; }
+ps1B: is B_BITS=11 { export ps1_f11; }
+ps1B: is B_BITS=12 { export ps1_f12; }
+ps1B: is B_BITS=13 { export ps1_f13; }
+ps1B: is B_BITS=14 { export ps1_f14; }
+ps1B: is B_BITS=15 { export ps1_f15; }
+ps1B: is B_BITS=16 { export ps1_f16; }
+ps1B: is B_BITS=17 { export ps1_f17; }
+ps1B: is B_BITS=18 { export ps1_f18; }
+ps1B: is B_BITS=19 { export ps1_f19; }
+ps1B: is B_BITS=20 { export ps1_f20; }
+ps1B: is B_BITS=21 { export ps1_f21; }
+ps1B: is B_BITS=22 { export ps1_f22; }
+ps1B: is B_BITS=23 { export ps1_f23; }
+ps1B: is B_BITS=24 { export ps1_f24; }
+ps1B: is B_BITS=25 { export ps1_f25; }
+ps1B: is B_BITS=26 { export ps1_f26; }
+ps1B: is B_BITS=27 { export ps1_f27; }
+ps1B: is B_BITS=28 { export ps1_f28; }
+ps1B: is B_BITS=29 { export ps1_f29; }
+ps1B: is B_BITS=30 { export ps1_f30; }
+ps1B: is B_BITS=31 { export ps1_f31; }
+
+ps1C: is BITS_6_10=0 { export ps1_f0; }
+ps1C: is BITS_6_10=1 { export ps1_f1; }
+ps1C: is BITS_6_10=2 { export ps1_f2; }
+ps1C: is BITS_6_10=3 { export ps1_f3; }
+ps1C: is BITS_6_10=4 { export ps1_f4; }
+ps1C: is BITS_6_10=5 { export ps1_f5; }
+ps1C: is BITS_6_10=6 { export ps1_f6; }
+ps1C: is BITS_6_10=7 { export ps1_f7; }
+ps1C: is BITS_6_10=8 { export ps1_f8; }
+ps1C: is BITS_6_10=9 { export ps1_f9; }
+ps1C: is BITS_6_10=10 { export ps1_f10; }
+ps1C: is BITS_6_10=11 { export ps1_f11; }
+ps1C: is BITS_6_10=12 { export ps1_f12; }
+ps1C: is BITS_6_10=13 { export ps1_f13; }
+ps1C: is BITS_6_10=14 { export ps1_f14; }
+ps1C: is BITS_6_10=15 { export ps1_f15; }
+ps1C: is BITS_6_10=16 { export ps1_f16; }
+ps1C: is BITS_6_10=17 { export ps1_f17; }
+ps1C: is BITS_6_10=18 { export ps1_f18; }
+ps1C: is BITS_6_10=19 { export ps1_f19; }
+ps1C: is BITS_6_10=20 { export ps1_f20; }
+ps1C: is BITS_6_10=21 { export ps1_f21; }
+ps1C: is BITS_6_10=22 { export ps1_f22; }
+ps1C: is BITS_6_10=23 { export ps1_f23; }
+ps1C: is BITS_6_10=24 { export ps1_f24; }
+ps1C: is BITS_6_10=25 { export ps1_f25; }
+ps1C: is BITS_6_10=26 { export ps1_f26; }
+ps1C: is BITS_6_10=27 { export ps1_f27; }
+ps1C: is BITS_6_10=28 { export ps1_f28; }
+ps1C: is BITS_6_10=29 { export ps1_f29; }
+ps1C: is BITS_6_10=30 { export ps1_f30; }
+ps1C: is BITS_6_10=31 { export ps1_f31; }
+
+@define GEKKO_PS1_D "& ps1D"
+@define GEKKO_PS1_FILL "ps1D = fD;"
+
+define pcodeop psqDequantize;    # (ea, GQR) -> element as double
+define pcodeop psqQuantize;      # (ea, GQR, value): stores one element
+define pcodeop dataCacheBlockClearToZeroLocked;
+
+# Quantization register selected by I (D-form bits 12..14, indexed form bits 7..9)
+psqGQRd: spr390 is (BITS_12_15=0 | BITS_12_15=8) & spr390 { export spr390; }
+psqGQRd: spr391 is (BITS_12_15=1 | BITS_12_15=9) & spr391 { export spr391; }
+psqGQRd: spr392 is (BITS_12_15=2 | BITS_12_15=10) & spr392 { export spr392; }
+psqGQRd: spr393 is (BITS_12_15=3 | BITS_12_15=11) & spr393 { export spr393; }
+psqGQRd: spr394 is (BITS_12_15=4 | BITS_12_15=12) & spr394 { export spr394; }
+psqGQRd: spr395 is (BITS_12_15=5 | BITS_12_15=13) & spr395 { export spr395; }
+psqGQRd: spr396 is (BITS_12_15=6 | BITS_12_15=14) & spr396 { export spr396; }
+psqGQRd: spr397 is (BITS_12_15=7 | BITS_12_15=15) & spr397 { export spr397; }
+psqGQRx: spr390 is (BITS_21_24=0 | BITS_21_24=8) & spr390 { export spr390; }
+psqGQRx: spr391 is (BITS_21_24=1 | BITS_21_24=9) & spr391 { export spr391; }
+psqGQRx: spr392 is (BITS_21_24=2 | BITS_21_24=10) & spr392 { export spr392; }
+psqGQRx: spr393 is (BITS_21_24=3 | BITS_21_24=11) & spr393 { export spr393; }
+psqGQRx: spr394 is (BITS_21_24=4 | BITS_21_24=12) & spr394 { export spr394; }
+psqGQRx: spr395 is (BITS_21_24=5 | BITS_21_24=13) & spr395 { export spr395; }
+psqGQRx: spr396 is (BITS_21_24=6 | BITS_21_24=14) & spr396 { export spr396; }
+psqGQRx: spr397 is (BITS_21_24=7 | BITS_21_24=15) & spr397 { export spr397; }
+
+# 12-bit signed displacement of the D-form quantized loads and stores
+psqAddr:  psqd(RA_OR_ZERO) is SIMM & RA_OR_ZERO [ psqd = ((SIMM & 0xfff) ^ 0x800) - 0x800; ]
+{ tmp:$(REGISTER_SIZE) = RA_OR_ZERO + psqd; export tmp; }
+psqAddrU: psqd(A)          is SIMM & A          [ psqd = ((SIMM & 0xfff) ^ 0x800) - 0x800; ]
+{ tmp:$(REGISTER_SIZE) = A + psqd; export tmp; }
+
+# Record (Rc=1) forms copy the FPSCR summary bits into cr1
+PSRC: is Rc=0 { }
+PSRC: "." is Rc=1 { cr1flags(); }
+
+macro psRound(dst, v) {
+	local single:4 = float2float(v);
+	dst = float2float(single);
+}
+
+################################################################
+# Quantized loads and stores
+################################################################
+
+:psq_l fD,psqAddr,"0",psqGQRd is OP=56 & fD & ps1D & psqAddr & BIT_15=0 & psqGQRd
+{
+	local ea:$(REGISTER_SIZE) = psqAddr;
+	local gqr:4 = psqGQRd;
+	local ltype:4 = (gqr >> 16) & 7;
+	if (ltype != 0) goto <dequantize>;
+	fD = float2float(*:4 ea);
+	ps1D = float2float(*:4 (ea + 4));
+	goto <done>;
+<dequantize>
+	fD = psqDequantize(ea, gqr);
+	local esize:$(REGISTER_SIZE) = (ltype & 1) + 1;
+	ps1D = psqDequantize(ea + esize, gqr);
+<done>
+}
+
+:psq_lu fD,psqAddrU,"0",psqGQRd is OP=57 & fD & ps1D & psqAddrU & BIT_15=0 & psqGQRd & A
+{
+	local ea:$(REGISTER_SIZE) = psqAddrU;
+	local gqr:4 = psqGQRd;
+	local ltype:4 = (gqr >> 16) & 7;
+	if (ltype != 0) goto <dequantize>;
+	fD = float2float(*:4 ea);
+	ps1D = float2float(*:4 (ea + 4));
+	goto <done>;
+<dequantize>
+	fD = psqDequantize(ea, gqr);
+	local esize:$(REGISTER_SIZE) = (ltype & 1) + 1;
+	ps1D = psqDequantize(ea + esize, gqr);
+<done>
+	A = ea;
+}
+
+:psq_st fS,psqAddr,"0",psqGQRd is OP=60 & fS & ps1D & psqAddr & BIT_15=0 & psqGQRd
+{
+	local ea:$(REGISTER_SIZE) = psqAddr;
+	local gqr:4 = psqGQRd;
+	local stype:4 = gqr & 7;
+	if (stype != 0) goto <quantize>;
+	*:4 ea = float2float(fS);
+	*:4 (ea + 4) = float2float(ps1D);
+	goto <done>;
+<quantize>
+	psqQuantize(ea, gqr, fS);
+	local esize:$(REGISTER_SIZE) = (stype & 1) + 1;
+	psqQuantize(ea + esize, gqr, ps1D);
+<done>
+}
+
+:psq_stu fS,psqAddrU,"0",psqGQRd is OP=61 & fS & ps1D & psqAddrU & BIT_15=0 & psqGQRd & A
+{
+	local ea:$(REGISTER_SIZE) = psqAddrU;
+	local gqr:4 = psqGQRd;
+	local stype:4 = gqr & 7;
+	if (stype != 0) goto <quantize>;
+	*:4 ea = float2float(fS);
+	*:4 (ea + 4) = float2float(ps1D);
+	goto <done>;
+<quantize>
+	psqQuantize(ea, gqr, fS);
+	local esize:$(REGISTER_SIZE) = (stype & 1) + 1;
+	psqQuantize(ea + esize, gqr, ps1D);
+<done>
+	A = ea;
+}
+
+:psq_lx fD,RA_OR_ZERO,B,"0",psqGQRx is OP=4 & fD & ps1D & RA_OR_ZERO & B & BIT_10=0 & psqGQRx & BIT_6=0 & XOP_1_5=6 & BIT_0=0
+{
+	local ea:$(REGISTER_SIZE) = RA_OR_ZERO + B;
+	local gqr:4 = psqGQRx;
+	local ltype:4 = (gqr >> 16) & 7;
+	if (ltype != 0) goto <dequantize>;
+	fD = float2float(*:4 ea);
+	ps1D = float2float(*:4 (ea + 4));
+	goto <done>;
+<dequantize>
+	fD = psqDequantize(ea, gqr);
+	local esize:$(REGISTER_SIZE) = (ltype & 1) + 1;
+	ps1D = psqDequantize(ea + esize, gqr);
+<done>
+}
+
+:psq_lux fD,A,B,"0",psqGQRx is OP=4 & fD & ps1D & A & B & BIT_10=0 & psqGQRx & BIT_6=1 & XOP_1_5=6 & BIT_0=0
+{
+	local ea:$(REGISTER_SIZE) = A + B;
+	local gqr:4 = psqGQRx;
+	local ltype:4 = (gqr >> 16) & 7;
+	if (ltype != 0) goto <dequantize>;
+	fD = float2float(*:4 ea);
+	ps1D = float2float(*:4 (ea + 4));
+	goto <done>;
+<dequantize>
+	fD = psqDequantize(ea, gqr);
+	local esize:$(REGISTER_SIZE) = (ltype & 1) + 1;
+	ps1D = psqDequantize(ea + esize, gqr);
+<done>
+	A = ea;
+}
+
+:psq_stx fS,RA_OR_ZERO,B,"0",psqGQRx is OP=4 & fS & ps1D & RA_OR_ZERO & B & BIT_10=0 & psqGQRx & BIT_6=0 & XOP_1_5=7 & BIT_0=0
+{
+	local ea:$(REGISTER_SIZE) = RA_OR_ZERO + B;
+	local gqr:4 = psqGQRx;
+	local stype:4 = gqr & 7;
+	if (stype != 0) goto <quantize>;
+	*:4 ea = float2float(fS);
+	*:4 (ea + 4) = float2float(ps1D);
+	goto <done>;
+<quantize>
+	psqQuantize(ea, gqr, fS);
+	local esize:$(REGISTER_SIZE) = (stype & 1) + 1;
+	psqQuantize(ea + esize, gqr, ps1D);
+<done>
+}
+
+:psq_stux fS,A,B,"0",psqGQRx is OP=4 & fS & ps1D & A & B & BIT_10=0 & psqGQRx & BIT_6=1 & XOP_1_5=7 & BIT_0=0
+{
+	local ea:$(REGISTER_SIZE) = A + B;
+	local gqr:4 = psqGQRx;
+	local stype:4 = gqr & 7;
+	if (stype != 0) goto <quantize>;
+	*:4 ea = float2float(fS);
+	*:4 (ea + 4) = float2float(ps1D);
+	goto <done>;
+<quantize>
+	psqQuantize(ea, gqr, fS);
+	local esize:$(REGISTER_SIZE) = (stype & 1) + 1;
+	psqQuantize(ea + esize, gqr, ps1D);
+<done>
+	A = ea;
+}
+
+:psq_l fD,psqAddr,"1",psqGQRd is OP=56 & fD & ps1D & psqAddr & BIT_15=1 & psqGQRd
+{
+	local ea:$(REGISTER_SIZE) = psqAddr;
+	local gqr:4 = psqGQRd;
+	local ltype:4 = (gqr >> 16) & 7;
+	if (ltype != 0) goto <dequantize>;
+	fD = float2float(*:4 ea);
+	local one:4 = 1;
+	ps1D = int2float(one);
+	goto <done>;
+<dequantize>
+	fD = psqDequantize(ea, gqr);
+	local one2:4 = 1;
+	ps1D = int2float(one2);
+<done>
+}
+
+:psq_lu fD,psqAddrU,"1",psqGQRd is OP=57 & fD & ps1D & psqAddrU & BIT_15=1 & psqGQRd & A
+{
+	local ea:$(REGISTER_SIZE) = psqAddrU;
+	local gqr:4 = psqGQRd;
+	local ltype:4 = (gqr >> 16) & 7;
+	if (ltype != 0) goto <dequantize>;
+	fD = float2float(*:4 ea);
+	local one:4 = 1;
+	ps1D = int2float(one);
+	goto <done>;
+<dequantize>
+	fD = psqDequantize(ea, gqr);
+	local one2:4 = 1;
+	ps1D = int2float(one2);
+<done>
+	A = ea;
+}
+
+:psq_st fS,psqAddr,"1",psqGQRd is OP=60 & fS & ps1D & psqAddr & BIT_15=1 & psqGQRd
+{
+	local ea:$(REGISTER_SIZE) = psqAddr;
+	local gqr:4 = psqGQRd;
+	local stype:4 = gqr & 7;
+	if (stype != 0) goto <quantize>;
+	*:4 ea = float2float(fS);
+	goto <done>;
+<quantize>
+	psqQuantize(ea, gqr, fS);
+<done>
+}
+
+:psq_stu fS,psqAddrU,"1",psqGQRd is OP=61 & fS & ps1D & psqAddrU & BIT_15=1 & psqGQRd & A
+{
+	local ea:$(REGISTER_SIZE) = psqAddrU;
+	local gqr:4 = psqGQRd;
+	local stype:4 = gqr & 7;
+	if (stype != 0) goto <quantize>;
+	*:4 ea = float2float(fS);
+	goto <done>;
+<quantize>
+	psqQuantize(ea, gqr, fS);
+<done>
+	A = ea;
+}
+
+:psq_lx fD,RA_OR_ZERO,B,"1",psqGQRx is OP=4 & fD & ps1D & RA_OR_ZERO & B & BIT_10=1 & psqGQRx & BIT_6=0 & XOP_1_5=6 & BIT_0=0
+{
+	local ea:$(REGISTER_SIZE) = RA_OR_ZERO + B;
+	local gqr:4 = psqGQRx;
+	local ltype:4 = (gqr >> 16) & 7;
+	if (ltype != 0) goto <dequantize>;
+	fD = float2float(*:4 ea);
+	local one:4 = 1;
+	ps1D = int2float(one);
+	goto <done>;
+<dequantize>
+	fD = psqDequantize(ea, gqr);
+	local one2:4 = 1;
+	ps1D = int2float(one2);
+<done>
+}
+
+:psq_lux fD,A,B,"1",psqGQRx is OP=4 & fD & ps1D & A & B & BIT_10=1 & psqGQRx & BIT_6=1 & XOP_1_5=6 & BIT_0=0
+{
+	local ea:$(REGISTER_SIZE) = A + B;
+	local gqr:4 = psqGQRx;
+	local ltype:4 = (gqr >> 16) & 7;
+	if (ltype != 0) goto <dequantize>;
+	fD = float2float(*:4 ea);
+	local one:4 = 1;
+	ps1D = int2float(one);
+	goto <done>;
+<dequantize>
+	fD = psqDequantize(ea, gqr);
+	local one2:4 = 1;
+	ps1D = int2float(one2);
+<done>
+	A = ea;
+}
+
+:psq_stx fS,RA_OR_ZERO,B,"1",psqGQRx is OP=4 & fS & ps1D & RA_OR_ZERO & B & BIT_10=1 & psqGQRx & BIT_6=0 & XOP_1_5=7 & BIT_0=0
+{
+	local ea:$(REGISTER_SIZE) = RA_OR_ZERO + B;
+	local gqr:4 = psqGQRx;
+	local stype:4 = gqr & 7;
+	if (stype != 0) goto <quantize>;
+	*:4 ea = float2float(fS);
+	goto <done>;
+<quantize>
+	psqQuantize(ea, gqr, fS);
+<done>
+}
+
+:psq_stux fS,A,B,"1",psqGQRx is OP=4 & fS & ps1D & A & B & BIT_10=1 & psqGQRx & BIT_6=1 & XOP_1_5=7 & BIT_0=0
+{
+	local ea:$(REGISTER_SIZE) = A + B;
+	local gqr:4 = psqGQRx;
+	local stype:4 = gqr & 7;
+	if (stype != 0) goto <quantize>;
+	*:4 ea = float2float(fS);
+	goto <done>;
+<quantize>
+	psqQuantize(ea, gqr, fS);
+<done>
+	A = ea;
+}
+
+################################################################
+# Paired-single arithmetic (A-form, primary opcode 4)
+################################################################
+
+:ps_div^PSRC fD,fA,fB is OP=4 & fD & ps1D & fA & ps1A & fB & ps1B & BITS_6_10=0 & XOP_1_5=18 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	psRound(fD, a0 f/ b0);
+	psRound(ps1D, a1 f/ b1);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_sub^PSRC fD,fA,fB is OP=4 & fD & ps1D & fA & ps1A & fB & ps1B & BITS_6_10=0 & XOP_1_5=20 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	psRound(fD, a0 f- b0);
+	psRound(ps1D, a1 f- b1);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_add^PSRC fD,fA,fB is OP=4 & fD & ps1D & fA & ps1A & fB & ps1B & BITS_6_10=0 & XOP_1_5=21 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	psRound(fD, a0 f+ b0);
+	psRound(ps1D, a1 f+ b1);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_res^PSRC fD,fB is OP=4 & fD & ps1D & fB & ps1B & BITS_16_20=0 & BITS_6_10=0 & XOP_1_5=24 & PSRC
+{
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	local onei:4 = 1;
+	local one:8 = int2float(onei);
+	psRound(fD, one f/ b0);
+	psRound(ps1D, one f/ b1);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_mul^PSRC fD,fA,fC is OP=4 & fD & ps1D & fA & ps1A & fC & ps1C & BITS_11_15=0 & XOP_1_5=25 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local c0:8 = fC;
+	local c1:8 = ps1C;
+	psRound(fD, a0 f* c0);
+	psRound(ps1D, a1 f* c1);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_rsqrte^PSRC fD,fB is OP=4 & fD & ps1D & fB & ps1B & BITS_16_20=0 & BITS_6_10=0 & XOP_1_5=26 & PSRC
+{
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	local onei:4 = 1;
+	local one:8 = int2float(onei);
+	psRound(fD, one f/ sqrt(b0));
+	psRound(ps1D, one f/ sqrt(b1));
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_msub^PSRC fD,fA,fC,fB is OP=4 & fD & ps1D & fA & ps1A & fC & ps1C & fB & ps1B & XOP_1_5=28 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	local c0:8 = fC;
+	local c1:8 = ps1C;
+	psRound(fD, (a0 f* c0) f- b0);
+	psRound(ps1D, (a1 f* c1) f- b1);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_madd^PSRC fD,fA,fC,fB is OP=4 & fD & ps1D & fA & ps1A & fC & ps1C & fB & ps1B & XOP_1_5=29 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	local c0:8 = fC;
+	local c1:8 = ps1C;
+	psRound(fD, (a0 f* c0) f+ b0);
+	psRound(ps1D, (a1 f* c1) f+ b1);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_nmsub^PSRC fD,fA,fC,fB is OP=4 & fD & ps1D & fA & ps1A & fC & ps1C & fB & ps1B & XOP_1_5=30 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	local c0:8 = fC;
+	local c1:8 = ps1C;
+	psRound(fD, f- ((a0 f* c0) f- b0));
+	psRound(ps1D, f- ((a1 f* c1) f- b1));
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_nmadd^PSRC fD,fA,fC,fB is OP=4 & fD & ps1D & fA & ps1A & fC & ps1C & fB & ps1B & XOP_1_5=31 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	local c0:8 = fC;
+	local c1:8 = ps1C;
+	psRound(fD, f- ((a0 f* c0) f+ b0));
+	psRound(ps1D, f- ((a1 f* c1) f+ b1));
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_sum0^PSRC fD,fA,fC,fB is OP=4 & fD & ps1D & fA & ps1A & fC & ps1C & fB & ps1B & XOP_1_5=10 & PSRC
+{
+	local a0:8 = fA;
+	local b1:8 = ps1B;
+	local c1:8 = ps1C;
+	psRound(fD, a0 f+ b1);
+	psRound(ps1D, c1);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_sum1^PSRC fD,fA,fC,fB is OP=4 & fD & ps1D & fA & ps1A & fC & ps1C & fB & ps1B & XOP_1_5=11 & PSRC
+{
+	local a0:8 = fA;
+	local b1:8 = ps1B;
+	local c0:8 = fC;
+	psRound(fD, c0);
+	psRound(ps1D, a0 f+ b1);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_muls0^PSRC fD,fA,fC is OP=4 & fD & ps1D & fA & ps1A & fC & ps1C & BITS_11_15=0 & XOP_1_5=12 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local c0:8 = fC;
+	psRound(fD, a0 f* c0);
+	psRound(ps1D, a1 f* c0);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_muls1^PSRC fD,fA,fC is OP=4 & fD & ps1D & fA & ps1A & fC & ps1C & BITS_11_15=0 & XOP_1_5=13 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local c1:8 = ps1C;
+	psRound(fD, a0 f* c1);
+	psRound(ps1D, a1 f* c1);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_madds0^PSRC fD,fA,fC,fB is OP=4 & fD & ps1D & fA & ps1A & fC & ps1C & fB & ps1B & XOP_1_5=14 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	local c0:8 = fC;
+	psRound(fD, (a0 f* c0) f+ b0);
+	psRound(ps1D, (a1 f* c0) f+ b1);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_madds1^PSRC fD,fA,fC,fB is OP=4 & fD & ps1D & fA & ps1A & fC & ps1C & fB & ps1B & XOP_1_5=15 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	local c1:8 = ps1C;
+	psRound(fD, (a0 f* c1) f+ b0);
+	psRound(ps1D, (a1 f* c1) f+ b1);
+	setFPRF(fD);
+	build PSRC;
+}
+
+:ps_sel^PSRC fD,fA,fC,fB is OP=4 & fD & ps1D & fA & ps1A & fC & ps1C & fB & ps1B & XOP_1_5=23 & PSRC
+{
+	local a0:8 = fA;
+	local a1:8 = ps1A;
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	local c0:8 = fC;
+	local c1:8 = ps1C;
+	local zeroi:4 = 0;
+	local zero:8 = int2float(zeroi);
+	fD = c0;
+	if (a0 f>= zero) goto <sel1>;
+	fD = b0;
+<sel1>
+	ps1D = c1;
+	if (a1 f>= zero) goto <sel2>;
+	ps1D = b1;
+<sel2>
+	build PSRC;
+}
+
+################################################################
+# Moves, sign operations, merges (X-form)
+################################################################
+
+:ps_neg^PSRC fD,fB is OP=4 & fD & ps1D & BITS_16_20=0 & fB & ps1B & XOP_1_10=40 & PSRC
+{
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	fD = f- b0;
+	ps1D = f- b1;
+	build PSRC;
+}
+
+:ps_mr^PSRC fD,fB is OP=4 & fD & ps1D & BITS_16_20=0 & fB & ps1B & XOP_1_10=72 & PSRC
+{
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	fD = b0;
+	ps1D = b1;
+	build PSRC;
+}
+
+:ps_nabs^PSRC fD,fB is OP=4 & fD & ps1D & BITS_16_20=0 & fB & ps1B & XOP_1_10=136 & PSRC
+{
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	fD = f- abs(b0);
+	ps1D = f- abs(b1);
+	build PSRC;
+}
+
+:ps_abs^PSRC fD,fB is OP=4 & fD & ps1D & BITS_16_20=0 & fB & ps1B & XOP_1_10=264 & PSRC
+{
+	local b0:8 = fB;
+	local b1:8 = ps1B;
+	fD = abs(b0);
+	ps1D = abs(b1);
+	build PSRC;
+}
+
+:ps_merge00^PSRC fD,fA,fB is OP=4 & fD & ps1D & fA & ps1A & fB & ps1B & XOP_1_10=528 & PSRC
+{
+	local hi:8 = fA;
+	local lo:8 = fB;
+	fD = hi;
+	ps1D = lo;
+	build PSRC;
+}
+
+:ps_merge01^PSRC fD,fA,fB is OP=4 & fD & ps1D & fA & ps1A & fB & ps1B & XOP_1_10=560 & PSRC
+{
+	local hi:8 = fA;
+	local lo:8 = ps1B;
+	fD = hi;
+	ps1D = lo;
+	build PSRC;
+}
+
+:ps_merge10^PSRC fD,fA,fB is OP=4 & fD & ps1D & fA & ps1A & fB & ps1B & XOP_1_10=592 & PSRC
+{
+	local hi:8 = ps1A;
+	local lo:8 = fB;
+	fD = hi;
+	ps1D = lo;
+	build PSRC;
+}
+
+:ps_merge11^PSRC fD,fA,fB is OP=4 & fD & ps1D & fA & ps1A & fB & ps1B & XOP_1_10=624 & PSRC
+{
+	local hi:8 = ps1A;
+	local lo:8 = ps1B;
+	fD = hi;
+	ps1D = lo;
+	build PSRC;
+}
+
+################################################################
+# Compares (ps0 or ps1 halves, like fcmpu / fcmpo)
+################################################################
+
+:ps_cmpu0 CRFD,fA,fB is OP=4 & CRFD & BITS_21_22=0 & fA & fB & XOP_1_10=0 & BIT_0=0
+{
+	local a:8 = fA;
+	local b:8 = fB;
+	local un:1 = nan(a) | nan(b);
+	fp_cc0 = a f< b;
+	fp_cc1 = a f> b;
+	fp_cc2 = a f== b;
+	fp_cc3 = un;
+	CRFD = (fp_cc0 << 3) | (fp_cc1 << 2) | (fp_cc2 << 1) | un;
+}
+
+:ps_cmpo0 CRFD,fA,fB is OP=4 & CRFD & BITS_21_22=0 & fA & fB & XOP_1_10=32 & BIT_0=0
+{
+	local a:8 = fA;
+	local b:8 = fB;
+	local un:1 = nan(a) | nan(b);
+	fp_cc0 = a f< b;
+	fp_cc1 = a f> b;
+	fp_cc2 = a f== b;
+	fp_cc3 = un;
+	CRFD = (fp_cc0 << 3) | (fp_cc1 << 2) | (fp_cc2 << 1) | un;
+}
+
+:ps_cmpu1 CRFD,fA,fB is OP=4 & CRFD & BITS_21_22=0 & fA & fB & ps1A & ps1B & XOP_1_10=64 & BIT_0=0
+{
+	local a:8 = ps1A;
+	local b:8 = ps1B;
+	local un:1 = nan(a) | nan(b);
+	fp_cc0 = a f< b;
+	fp_cc1 = a f> b;
+	fp_cc2 = a f== b;
+	fp_cc3 = un;
+	CRFD = (fp_cc0 << 3) | (fp_cc1 << 2) | (fp_cc2 << 1) | un;
+}
+
+:ps_cmpo1 CRFD,fA,fB is OP=4 & CRFD & BITS_21_22=0 & fA & fB & ps1A & ps1B & XOP_1_10=96 & BIT_0=0
+{
+	local a:8 = ps1A;
+	local b:8 = ps1B;
+	local un:1 = nan(a) | nan(b);
+	fp_cc0 = a f< b;
+	fp_cc1 = a f> b;
+	fp_cc2 = a f== b;
+	fp_cc3 = un;
+	CRFD = (fp_cc0 << 3) | (fp_cc1 << 2) | (fp_cc2 << 1) | un;
+}
+
+################################################################
+# Locked-cache block zero
+################################################################
+
+:dcbz_l RA_OR_ZERO,B is OP=4 & BITS_21_25=0 & RA_OR_ZERO & B & XOP_1_10=1014 & BIT_0=0
+{
+	ea:$(REGISTER_SIZE) = RA_OR_ZERO + B;
+	dataCacheBlockClearToZeroLocked(ea);
+}

@@ -2024,6 +2024,17 @@ CRM_CR:	cr0		is CRM=128 & cr0	{tmp:4 = zext(cr0) << 28;export tmp;}
 ################################################################
 
 
+# Gekko/Broadway paired singles (PowerPC:BE:32:Gekko_Broadway only). GEKKO_PS1_D adds the
+# ps1 half of fD to a constructor's operands and GEKKO_PS1_FILL copies the result into it
+# (single-precision loads and arithmetic write both halves on these CPUs). Both expand to
+# nothing in every other language.
+@ifdef GEKKO_PS
+@include "ppc_gekko.sinc"
+@else
+@define GEKKO_PS1_D ""
+@define GEKKO_PS1_FILL ""
+@endif
+
 @include "ppc_instructions.sinc"
 @include "ppc_embedded.sinc"
 
