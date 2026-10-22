@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<language_definitions>
+
+  <language processor="65816"
+            endian="little"
+            size="24"
+            variant="default"
+            version="1.0"
+            slafile="65816.sla"
+            processorspec="65816.pspec"
+            id="65816:LE:24:default">
+    <description>WDC 65C816 (SNES 5A22), native and emulation mode</description>
+    <compiler name="default" spec="65816.cspec" id="default"/>
+    <external_name tool="IDA-PRO" name="m65816"/>
+  </language>
+
+</language_definitions>

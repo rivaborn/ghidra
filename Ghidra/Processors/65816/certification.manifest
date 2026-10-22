@@ -1,0 +1,7 @@
+##VERSION: 2.0
+Module.manifest||GHIDRA||||END|
+README.md||GHIDRA||||END|
+data/languages/65816.cspec||GHIDRA||||END|
+data/languages/65816.ldefs||GHIDRA||||END|
+data/languages/65816.pspec||GHIDRA||||END|
+data/languages/65816.slaspec||GHIDRA||||END|
