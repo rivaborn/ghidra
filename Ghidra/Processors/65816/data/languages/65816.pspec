@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<processor_spec>
+  <programcounter register="PC"/>
+
+  <!-- Default disassembly context: native mode with 8-bit accumulator and
+       8-bit index registers (M=1, X=1, E=0). Change it per address range
+       with "Set Register Values..." on mflag / xflag / emode. -->
+  <context_data>
+    <context_set space="ram">
+      <set name="mflag" val="1"/>
+      <set name="xflag" val="1"/>
+      <set name="emode" val="0"/>
+      <set name="savedM" val="1"/>
+      <set name="savedX" val="1"/>
+    </context_set>
+    <tracked_set space="ram">
+      <set name="MF" val="1"/>
+      <set name="XF" val="1"/>
+      <set name="EF" val="0"/>
+    </tracked_set>
+  </context_data>
+
+  <register_data>
+    <register name="contextreg" hidden="true"/>
+    <register name="P" hidden="true"/>
+  </register_data>
+
+  <default_symbols>
+    <symbol name="VEC_COP_NATIVE"   address="00FFE4"/>
+    <symbol name="VEC_BRK_NATIVE"   address="00FFE6"/>
+    <symbol name="VEC_ABORT_NATIVE" address="00FFE8"/>
+    <symbol name="VEC_NMI_NATIVE"   address="00FFEA"/>
+    <symbol name="VEC_IRQ_NATIVE"   address="00FFEE"/>
+    <symbol name="VEC_COP_EMU"      address="00FFF4"/>
+    <symbol name="VEC_ABORT_EMU"    address="00FFF8"/>
+    <symbol name="VEC_NMI_EMU"      address="00FFFA"/>
+    <symbol name="VEC_RESET"        address="00FFFC"/>
+    <symbol name="VEC_IRQ_BRK_EMU"  address="00FFFE"/>
+  </default_symbols>
+</processor_spec>

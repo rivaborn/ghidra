@@ -1,0 +1,742 @@
+# ###
+# IP: GHIDRA
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ###
+#
+# SLEIGH specification for the WDC 65C816 (the SNES 5A22 CPU core).
+#
+# Address space: 24 bits (bank:offset). Native and emulation mode.
+#
+# Operand sizes depend on the M and X status flags, which are modelled as
+# flowing context bits (mflag, xflag) so the disassembler knows how many
+# immediate bytes follow. REP/SEP #imm, PLP (after a PHP), XCE (after
+# CLC/SEC) update the context for the following instructions.
+#
+#   mflag = 1 : accumulator and memory operations are 8 bits (A)
+#   mflag = 0 : accumulator and memory operations are 16 bits (C = B:A)
+#   xflag = 1 : index registers are 8 bits (high bytes of X and Y are 0)
+#   xflag = 0 : index registers are 16 bits
+#   emode = 1 : emulation mode (M and X forced to 1)
+#
+# Address formation:
+#   direct page      : bank 0, D + dp           (16-bit wrap)
+#   absolute (data)  : DBR:addr                 (DBR register)
+#   absolute (jumps) : PBR:addr                 (bank of the instruction)
+#   long             : 24-bit operand
+#   stack            : bank 0, S                (see SP below)
+#
+# Not modelled: decimal-mode (D flag) arithmetic, the emulation-mode
+# direct-page/stack page wrap quirks, the emulation-mode B (break) flag.
+
+define endian=little;
+define alignment=1;
+
+define space ram      type=ram_space      size=3 default;
+define space register type=register_space size=4;
+
+# Accumulator C = B:A, index registers, stack pointer, direct page
+define register offset=0x00 size=2 [ C X Y ];
+define register offset=0x00 size=1 [ A B XL XH YL YH ];
+
+# Stack pointer. The 65816 S register points at the next free byte
+# (post-decrement push). Ghidra's decompiler expects the stack pointer to
+# point at the last pushed byte (the return address after a call), so the
+# register modelled here is SP = S + 1, as a 24-bit bank-0 address:
+#   push: SP = SP - n; *SP = value      pop: value = *SP; SP = SP + n
+#   sr,S addresses SP - 1 + sr;  TSC/TSX read SP - 1;  TCS/TXS write value + 1
+# The architectural S is therefore SP - 1 (shown by TSC/TSX).
+define register offset=0x08 size=3 [ SP ];
+
+define register offset=0x0C size=2 [ D ];
+define register offset=0x0C size=1 [ DL DH ];
+
+# Bank registers
+define register offset=0x10 size=1 [ DBR ];
+
+# Program counter (PBR:PC); PBR is the bank byte of PC
+define register offset=0x14 size=3 [ PC ];
+define register offset=0x16 size=1 [ PBR ];
+
+# Status bits (P = N V M X D I Z C) and the emulation bit E
+define register offset=0x20 size=1 [ NF VF MF XF DF IF ZF CF EF P ];
+
+# Context register
+define register offset=0x40 size=4 contextreg;
+define context contextreg
+    mflag  = (0,0)          # 1: 8-bit accumulator / memory
+    xflag  = (1,1)          # 1: 8-bit index registers
+    emode  = (2,2)          # 1: emulation mode
+    savedM = (3,3)          # mflag saved by the last PHP
+    savedX = (4,4)          # xflag saved by the last PHP
+    cknown = (5,6) noflow   # carry known for the next instruction: 1 clear, 2 set
+;
+
+################################################################
+# Tokens
+################################################################
+
+define token opbyte (8)
+    op  = (0,7)
+    aaa = (5,7)
+    bbb = (2,4)
+    cc  = (0,1)
+;
+
+define token data8 (8)
+    imm8 = (0,7)
+    rel8 = (0,7) signed
+;
+
+define token data16 (16)
+    imm16 = (0,15)
+    rel16 = (0,15) signed
+;
+
+define token data24 (24)
+    imm24 = (0,23)
+;
+
+define token blockmove (16)
+    dstbk = (0,7)
+    srcbk = (8,15)
+;
+
+################################################################
+# Pseudo operations
+################################################################
+
+define pcodeop softwareInterrupt;      # BRK
+define pcodeop coprocessorInterrupt;   # COP
+define pcodeop waitForInterrupt;       # WAI
+define pcodeop stopClock;              # STP
+
+################################################################
+# Macros
+################################################################
+
+macro nz(v) {
+    ZF = (v == 0);
+    NF = (v s< 0);
+}
+
+macro push8(v) {
+    SP = SP - 1;
+    *:1 SP = v;
+}
+
+macro push16(v) {
+    SP = SP - 2;
+    *:2 SP = v;
+}
+
+macro push24(v) {
+    SP = SP - 3;
+    *:3 SP = v;
+}
+
+macro pop8(v) {
+    v = *:1 SP;
+    SP = SP + 1;
+}
+
+macro pop16(v) {
+    v = *:2 SP;
+    SP = SP + 2;
+}
+
+macro pop24(v) {
+    v = *:3 SP;
+    SP = SP + 3;
+}
+
+macro packP(p) {
+    p = (NF << 7) | (VF << 6) | (MF << 5) | (XF << 4) | (DF << 3) | (IF << 2) | (ZF << 1) | CF;
+}
+
+macro unpackP(p) {
+    NF = (p >> 7) & 1;
+    VF = (p >> 6) & 1;
+    MF = (p >> 5) & 1;
+    XF = (p >> 4) & 1;
+    DF = (p >> 3) & 1;
+    IF = (p >> 2) & 1;
+    ZF = (p >> 1) & 1;
+    CF = p & 1;
+}
+
+# 8-bit index mode keeps the high bytes of X and Y at zero
+macro clipIndex() {
+    local keep:2 = 0xFFFF - (zext(XF) * 0xFF00);
+    X = X & keep;
+    Y = Y & keep;
+}
+
+macro adc(r, op) {
+    local cin = zext(CF);
+    local sum = r + op;
+    local res = sum + cin;
+    CF = carry(r, op) || carry(sum, cin);
+    VF = ((r ^ res) & (op ^ res)) s< 0;
+    r = res;
+    nz(r);
+}
+
+macro sbc(r, op) {
+    local inv = ~op;
+    local cin = zext(CF);
+    local sum = r + inv;
+    local res = sum + cin;
+    CF = carry(r, inv) || carry(sum, cin);
+    VF = ((r ^ op) & (r ^ res)) s< 0;
+    r = res;
+    nz(r);
+}
+
+macro cmp(r, op) {
+    local res = r - op;
+    CF = r >= op;
+    nz(res);
+}
+
+################################################################
+# Basic addressing modes: each exports the 24-bit effective address
+################################################################
+
+# Direct page: bank 0, D + dp
+DP:    imm8        is imm8                 { ea:3 = zext(D + imm8); export ea; }
+DPX:   imm8,X      is imm8 & X             { ea:3 = zext(D + imm8 + X); export ea; }
+DPY:   imm8,Y      is imm8 & Y             { ea:3 = zext(D + imm8 + Y); export ea; }
+# (dp) : 16-bit pointer in the direct page, data bank DBR
+DPI:   (imm8)      is imm8                 { pa:3 = zext(D + imm8); p:2 = *:2 pa; ea:3 = (zext(DBR) << 16) | zext(p); export ea; }
+# [dp] : 24-bit pointer in the direct page
+DPIL:  [imm8]      is imm8                 { pa:3 = zext(D + imm8); ea:3 = *:3 pa; export ea; }
+# (dp,X)
+DPXI:  (imm8,X)    is imm8 & X             { pa:3 = zext(D + imm8 + X); p:2 = *:2 pa; ea:3 = (zext(DBR) << 16) | zext(p); export ea; }
+# (dp),Y
+DPIY:  (imm8),Y    is imm8 & Y             { pa:3 = zext(D + imm8); p:2 = *:2 pa; ea:3 = ((zext(DBR) << 16) | zext(p)) + zext(Y); export ea; }
+# [dp],Y
+DPILY: [imm8],Y    is imm8 & Y             { pa:3 = zext(D + imm8); p:3 = *:3 pa; ea:3 = p + zext(Y); export ea; }
+# sr,S : stack relative (bank 0)
+SR:    imm8^",S"     is imm8                 { ea:3 = SP + imm8 - 1; export ea; }
+# (sr,S),Y
+SRIY:  "("^imm8^",S),"^Y  is imm8 & Y   { pa:3 = SP + imm8 - 1; p:2 = *:2 pa; ea:3 = ((zext(DBR) << 16) | zext(p)) + zext(Y); export ea; }
+# Absolute data: DBR:addr
+ABS:   imm16       is imm16                { ea:3 = (zext(DBR) << 16) | imm16; export ea; }
+ABSX:  imm16,X     is imm16 & X            { ea:3 = ((zext(DBR) << 16) | imm16) + zext(X); export ea; }
+ABSY:  imm16,Y     is imm16 & Y            { ea:3 = ((zext(DBR) << 16) | imm16) + zext(Y); export ea; }
+# Absolute long
+LONG:  imm24       is imm24                { ea:3 = imm24; export ea; }
+LONGX: imm24,X     is imm24 & X            { ea:3 = imm24 + zext(X); export ea; }
+
+################################################################
+# ALU group (ORA AND EOR ADC STA LDA CMP SBC): cc=1, cc=3, (dp) at x2
+# The instruction constructors repeat the opcode-bit constraints so the
+# decoder never selects an ALU constructor for a non-ALU opcode.
+################################################################
+
+AMA: DPXI   is cc=1 & bbb=0; DPXI   { export DPXI; }
+AMA: DP     is cc=1 & bbb=1; DP     { export DP; }
+AMA: ABS    is cc=1 & bbb=3; ABS    { export ABS; }
+AMA: DPIY   is cc=1 & bbb=4; DPIY   { export DPIY; }
+AMA: DPX    is cc=1 & bbb=5; DPX    { export DPX; }
+AMA: ABSY   is cc=1 & bbb=6; ABSY   { export ABSY; }
+AMA: ABSX   is cc=1 & bbb=7; ABSX   { export ABSX; }
+AMA: SR     is cc=3 & bbb=0; SR     { export SR; }
+AMA: DPIL   is cc=3 & bbb=1; DPIL   { export DPIL; }
+AMA: LONG   is cc=3 & bbb=3; LONG   { export LONG; }
+AMA: SRIY   is cc=3 & bbb=4; SRIY   { export SRIY; }
+AMA: DPILY  is cc=3 & bbb=5; DPILY  { export DPILY; }
+AMA: LONGX  is cc=3 & bbb=7; LONGX  { export LONGX; }
+AMA: DPI    is cc=2 & bbb=4; DPI    { export DPI; }
+
+MEMA8:  AMA  is AMA  { export *:1 AMA; }
+MEMA16: AMA  is AMA  { export *:2 AMA; }
+
+OPA8:  "#"imm8   is cc=1 & bbb=2; imm8   { export *[const]:1 imm8; }
+OPA8:  MEMA8     is MEMA8                { export MEMA8; }
+OPA16: "#"imm16  is cc=1 & bbb=2; imm16  { export *[const]:2 imm16; }
+OPA16: MEMA16    is MEMA16               { export MEMA16; }
+
+################################################################
+# M-sized group with explicit opcodes (STZ BIT TSB TRB and the
+# read-modify-write shifts / INC / DEC)
+################################################################
+
+AMM: DP    is (op=0x04 | op=0x14 | op=0x24 | op=0x64 | op=0x06 | op=0x26 | op=0x46 | op=0x66 | op=0xC6 | op=0xE6); DP     { export DP; }
+AMM: DPX   is (op=0x34 | op=0x74 | op=0x16 | op=0x36 | op=0x56 | op=0x76 | op=0xD6 | op=0xF6); DPX                                 { export DPX; }
+AMM: ABS   is (op=0x0C | op=0x1C | op=0x2C | op=0x9C | op=0x0E | op=0x2E | op=0x4E | op=0x6E | op=0xCE | op=0xEE); ABS  { export ABS; }
+AMM: ABSX  is (op=0x3C | op=0x9E | op=0x1E | op=0x3E | op=0x5E | op=0x7E | op=0xDE | op=0xFE); ABSX                                { export ABSX; }
+
+MEMM8:  AMM  is AMM  { export *:1 AMM; }
+MEMM16: AMM  is AMM  { export *:2 AMM; }
+
+################################################################
+# X-sized group (LDX LDY STX STY CPX CPY)
+################################################################
+
+AMI: DP    is (op=0xA6 | op=0xA4 | op=0x86 | op=0x84 | op=0xE4 | op=0xC4); DP     { export DP; }
+AMI: ABS   is (op=0xAE | op=0xAC | op=0x8E | op=0x8C | op=0xEC | op=0xCC); ABS    { export ABS; }
+AMI: DPY   is (op=0xB6 | op=0x96); DPY                                          { export DPY; }
+AMI: DPX   is (op=0xB4 | op=0x94); DPX                                          { export DPX; }
+AMI: ABSY  is op=0xBE; ABSY                                                     { export ABSY; }
+AMI: ABSX  is op=0xBC; ABSX                                                     { export ABSX; }
+
+MEMI8:  AMI  is AMI  { export *:1 AMI; }
+MEMI16: AMI  is AMI  { export *:2 AMI; }
+
+OPI8:  "#"imm8   is (op=0xA2 | op=0xA0 | op=0xE0 | op=0xC0); imm8   { export *[const]:1 imm8; }
+OPI8:  MEMI8     is MEMI8                                           { export MEMI8; }
+OPI16: "#"imm16  is (op=0xA2 | op=0xA0 | op=0xE0 | op=0xC0); imm16  { export *[const]:2 imm16; }
+OPI16: MEMI16    is MEMI16                                          { export MEMI16; }
+
+################################################################
+# Program flow targets
+################################################################
+
+# Branch targets stay in the program bank
+REL8:  reloc  is rel8   [ reloc = (inst_start & 0xFF0000) | ((inst_next + rel8) & 0xFFFF); ]   { export *:1 reloc; }
+REL16: reloc  is rel16  [ reloc = (inst_start & 0xFF0000) | ((inst_next + rel16) & 0xFFFF); ]  { export *:1 reloc; }
+
+# JMP/JSR absolute: PBR:addr
+JABS:  tgt    is imm16  [ tgt = (inst_start & 0xFF0000) | imm16; ]  { export *:1 tgt; }
+# JML/JSL long
+JLONG: imm24  is imm24                                              { export *:1 imm24; }
+
+################################################################
+# ALU instructions
+################################################################
+
+:ORA OPA8   is (mflag=1 & aaa=0 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { A = A | OPA8; nz(A); }
+:ORA OPA16  is (mflag=0 & aaa=0 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { C = C | OPA16; nz(C); }
+:AND OPA8   is (mflag=1 & aaa=1 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { A = A & OPA8; nz(A); }
+:AND OPA16  is (mflag=0 & aaa=1 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { C = C & OPA16; nz(C); }
+:EOR OPA8   is (mflag=1 & aaa=2 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { A = A ^ OPA8; nz(A); }
+:EOR OPA16  is (mflag=0 & aaa=2 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { C = C ^ OPA16; nz(C); }
+:ADC OPA8   is (mflag=1 & aaa=3 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { local o = OPA8; adc(A, o); }
+:ADC OPA16  is (mflag=0 & aaa=3 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { local o = OPA16; adc(C, o); }
+:STA MEMA8  is (mflag=1 & aaa=4 & op!=0x89 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & MEMA8   { MEMA8 = A; }
+:STA MEMA16 is (mflag=0 & aaa=4 & op!=0x89 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & MEMA16  { MEMA16 = C; }
+:LDA OPA8   is (mflag=1 & aaa=5 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { A = OPA8; nz(A); }
+:LDA OPA16  is (mflag=0 & aaa=5 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { C = OPA16; nz(C); }
+:CMP OPA8   is (mflag=1 & aaa=6 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { local o = OPA8; cmp(A, o); }
+:CMP OPA16  is (mflag=0 & aaa=6 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { local o = OPA16; cmp(C, o); }
+:SBC OPA8   is (mflag=1 & aaa=7 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { local o = OPA8; sbc(A, o); }
+:SBC OPA16  is (mflag=0 & aaa=7 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { local o = OPA16; sbc(C, o); }
+
+################################################################
+# BIT, TSB, TRB, STZ
+################################################################
+
+:BIT "#"imm8   is mflag=1 & op=0x89; imm8   { local t:1 = A & imm8; ZF = (t == 0); }
+:BIT "#"imm16  is mflag=0 & op=0x89; imm16  { local t:2 = C & imm16; ZF = (t == 0); }
+
+:BIT MEMM8   is (mflag=1 & (op=0x24 | op=0x2C | op=0x34 | op=0x3C)) ... & MEMM8
+{
+    local m = MEMM8;
+    NF = (m & 0x80) != 0;
+    VF = (m & 0x40) != 0;
+    ZF = (A & m) == 0;
+}
+:BIT MEMM16  is (mflag=0 & (op=0x24 | op=0x2C | op=0x34 | op=0x3C)) ... & MEMM16
+{
+    local m = MEMM16;
+    NF = (m & 0x8000) != 0;
+    VF = (m & 0x4000) != 0;
+    ZF = (C & m) == 0;
+}
+
+:TSB MEMM8   is (mflag=1 & (op=0x04 | op=0x0C)) ... & MEMM8   { local m = MEMM8; ZF = (A & m) == 0; MEMM8 = m | A; }
+:TSB MEMM16  is (mflag=0 & (op=0x04 | op=0x0C)) ... & MEMM16  { local m = MEMM16; ZF = (C & m) == 0; MEMM16 = m | C; }
+:TRB MEMM8   is (mflag=1 & (op=0x14 | op=0x1C)) ... & MEMM8   { local m = MEMM8; ZF = (A & m) == 0; MEMM8 = m & ~A; }
+:TRB MEMM16  is (mflag=0 & (op=0x14 | op=0x1C)) ... & MEMM16  { local m = MEMM16; ZF = (C & m) == 0; MEMM16 = m & ~C; }
+
+:STZ MEMM8   is (mflag=1 & (op=0x64 | op=0x74 | op=0x9C | op=0x9E)) ... & MEMM8   { MEMM8 = 0; }
+:STZ MEMM16  is (mflag=0 & (op=0x64 | op=0x74 | op=0x9C | op=0x9E)) ... & MEMM16  { MEMM16 = 0; }
+
+################################################################
+# Shifts, rotates, INC, DEC (accumulator and memory)
+################################################################
+
+:ASL A       is mflag=1 & op=0x0A & A   { CF = (A & 0x80) != 0; A = A << 1; nz(A); }
+:ASL A       is mflag=0 & op=0x0A & A   { CF = (C & 0x8000) != 0; C = C << 1; nz(C); }
+:ASL MEMM8   is (mflag=1 & (op=0x06 | op=0x0E | op=0x16 | op=0x1E)) ... & MEMM8   { local m = MEMM8; CF = (m & 0x80) != 0; m = m << 1; MEMM8 = m; nz(m); }
+:ASL MEMM16  is (mflag=0 & (op=0x06 | op=0x0E | op=0x16 | op=0x1E)) ... & MEMM16  { local m = MEMM16; CF = (m & 0x8000) != 0; m = m << 1; MEMM16 = m; nz(m); }
+
+:LSR A       is mflag=1 & op=0x4A & A   { CF = (A & 1) != 0; A = A >> 1; nz(A); }
+:LSR A       is mflag=0 & op=0x4A & A   { CF = (C & 1) != 0; C = C >> 1; nz(C); }
+:LSR MEMM8   is (mflag=1 & (op=0x46 | op=0x4E | op=0x56 | op=0x5E)) ... & MEMM8   { local m = MEMM8; CF = (m & 1) != 0; m = m >> 1; MEMM8 = m; nz(m); }
+:LSR MEMM16  is (mflag=0 & (op=0x46 | op=0x4E | op=0x56 | op=0x5E)) ... & MEMM16  { local m = MEMM16; CF = (m & 1) != 0; m = m >> 1; MEMM16 = m; nz(m); }
+
+:ROL A       is mflag=1 & op=0x2A & A   { local ci = CF; CF = (A & 0x80) != 0; A = (A << 1) | ci; nz(A); }
+:ROL A       is mflag=0 & op=0x2A & A   { local ci = zext(CF); CF = (C & 0x8000) != 0; C = (C << 1) | ci; nz(C); }
+:ROL MEMM8   is (mflag=1 & (op=0x26 | op=0x2E | op=0x36 | op=0x3E)) ... & MEMM8   { local ci = CF; local m = MEMM8; CF = (m & 0x80) != 0; m = (m << 1) | ci; MEMM8 = m; nz(m); }
+:ROL MEMM16  is (mflag=0 & (op=0x26 | op=0x2E | op=0x36 | op=0x3E)) ... & MEMM16  { local ci = zext(CF); local m = MEMM16; CF = (m & 0x8000) != 0; m = (m << 1) | ci; MEMM16 = m; nz(m); }
+
+:ROR A       is mflag=1 & op=0x6A & A   { local ci = CF << 7; CF = (A & 1) != 0; A = (A >> 1) | ci; nz(A); }
+:ROR A       is mflag=0 & op=0x6A & A   { local ci = zext(CF) << 15; CF = (C & 1) != 0; C = (C >> 1) | ci; nz(C); }
+:ROR MEMM8   is (mflag=1 & (op=0x66 | op=0x6E | op=0x76 | op=0x7E)) ... & MEMM8   { local ci = CF << 7; local m = MEMM8; CF = (m & 1) != 0; m = (m >> 1) | ci; MEMM8 = m; nz(m); }
+:ROR MEMM16  is (mflag=0 & (op=0x66 | op=0x6E | op=0x76 | op=0x7E)) ... & MEMM16  { local ci = zext(CF) << 15; local m = MEMM16; CF = (m & 1) != 0; m = (m >> 1) | ci; MEMM16 = m; nz(m); }
+
+:INC A       is mflag=1 & op=0x1A & A   { A = A + 1; nz(A); }
+:INC A       is mflag=0 & op=0x1A & A   { C = C + 1; nz(C); }
+:INC MEMM8   is (mflag=1 & (op=0xE6 | op=0xEE | op=0xF6 | op=0xFE)) ... & MEMM8   { local m = MEMM8 + 1; MEMM8 = m; nz(m); }
+:INC MEMM16  is (mflag=0 & (op=0xE6 | op=0xEE | op=0xF6 | op=0xFE)) ... & MEMM16  { local m = MEMM16 + 1; MEMM16 = m; nz(m); }
+
+:DEC A       is mflag=1 & op=0x3A & A   { A = A - 1; nz(A); }
+:DEC A       is mflag=0 & op=0x3A & A   { C = C - 1; nz(C); }
+:DEC MEMM8   is (mflag=1 & (op=0xC6 | op=0xCE | op=0xD6 | op=0xDE)) ... & MEMM8   { local m = MEMM8 - 1; MEMM8 = m; nz(m); }
+:DEC MEMM16  is (mflag=0 & (op=0xC6 | op=0xCE | op=0xD6 | op=0xDE)) ... & MEMM16  { local m = MEMM16 - 1; MEMM16 = m; nz(m); }
+
+################################################################
+# Index register loads, stores, compares, increments
+################################################################
+
+:LDX OPI8    is (xflag=1 & (op=0xA2 | op=0xA6 | op=0xAE | op=0xB6 | op=0xBE)) ... & OPI8    { XL = OPI8; XH = 0; nz(XL); }
+:LDX OPI16   is (xflag=0 & (op=0xA2 | op=0xA6 | op=0xAE | op=0xB6 | op=0xBE)) ... & OPI16   { X = OPI16; nz(X); }
+:LDY OPI8    is (xflag=1 & (op=0xA0 | op=0xA4 | op=0xAC | op=0xB4 | op=0xBC)) ... & OPI8    { YL = OPI8; YH = 0; nz(YL); }
+:LDY OPI16   is (xflag=0 & (op=0xA0 | op=0xA4 | op=0xAC | op=0xB4 | op=0xBC)) ... & OPI16   { Y = OPI16; nz(Y); }
+:STX MEMI8   is (xflag=1 & (op=0x86 | op=0x8E | op=0x96)) ... & MEMI8    { MEMI8 = XL; }
+:STX MEMI16  is (xflag=0 & (op=0x86 | op=0x8E | op=0x96)) ... & MEMI16   { MEMI16 = X; }
+:STY MEMI8   is (xflag=1 & (op=0x84 | op=0x8C | op=0x94)) ... & MEMI8    { MEMI8 = YL; }
+:STY MEMI16  is (xflag=0 & (op=0x84 | op=0x8C | op=0x94)) ... & MEMI16   { MEMI16 = Y; }
+:CPX OPI8    is (xflag=1 & (op=0xE0 | op=0xE4 | op=0xEC)) ... & OPI8     { local o = OPI8; cmp(XL, o); }
+:CPX OPI16   is (xflag=0 & (op=0xE0 | op=0xE4 | op=0xEC)) ... & OPI16    { local o = OPI16; cmp(X, o); }
+:CPY OPI8    is (xflag=1 & (op=0xC0 | op=0xC4 | op=0xCC)) ... & OPI8     { local o = OPI8; cmp(YL, o); }
+:CPY OPI16   is (xflag=0 & (op=0xC0 | op=0xC4 | op=0xCC)) ... & OPI16    { local o = OPI16; cmp(Y, o); }
+
+:INX  is xflag=1 & op=0xE8  { XL = XL + 1; XH = 0; nz(XL); }
+:INX  is xflag=0 & op=0xE8  { X = X + 1; nz(X); }
+:INY  is xflag=1 & op=0xC8  { YL = YL + 1; YH = 0; nz(YL); }
+:INY  is xflag=0 & op=0xC8  { Y = Y + 1; nz(Y); }
+:DEX  is xflag=1 & op=0xCA  { XL = XL - 1; XH = 0; nz(XL); }
+:DEX  is xflag=0 & op=0xCA  { X = X - 1; nz(X); }
+:DEY  is xflag=1 & op=0x88  { YL = YL - 1; YH = 0; nz(YL); }
+:DEY  is xflag=0 & op=0x88  { Y = Y - 1; nz(Y); }
+
+################################################################
+# Register transfers
+################################################################
+
+:TAX  is xflag=1 & op=0xAA  { XL = A; XH = 0; nz(XL); }
+:TAX  is xflag=0 & op=0xAA  { X = C; nz(X); }
+:TAY  is xflag=1 & op=0xA8  { YL = A; YH = 0; nz(YL); }
+:TAY  is xflag=0 & op=0xA8  { Y = C; nz(Y); }
+:TXA  is mflag=1 & op=0x8A  { A = XL; nz(A); }
+:TXA  is mflag=0 & op=0x8A  { C = X; nz(C); }
+:TYA  is mflag=1 & op=0x98  { A = YL; nz(A); }
+:TYA  is mflag=0 & op=0x98  { C = Y; nz(C); }
+:TSX  is xflag=1 & op=0xBA  { local s:3 = SP - 1; XL = s:1; XH = 0; nz(XL); }
+:TSX  is xflag=0 & op=0xBA  { local s:3 = SP - 1; X = s:2; nz(X); }
+:TXS  is emode=1 & op=0x9A  { local s:2 = 0x100 | zext(XL); SP = zext(s) + 1; }
+:TXS  is emode=0 & op=0x9A  { SP = zext(X) + 1; }
+:TXY  is xflag=1 & op=0x9B  { YL = XL; YH = 0; nz(YL); }
+:TXY  is xflag=0 & op=0x9B  { Y = X; nz(Y); }
+:TYX  is xflag=1 & op=0xBB  { XL = YL; XH = 0; nz(XL); }
+:TYX  is xflag=0 & op=0xBB  { X = Y; nz(X); }
+:TCD  is op=0x5B            { D = C; nz(D); }
+:TDC  is op=0x7B            { C = D; nz(C); }
+:TCS  is emode=1 & op=0x1B  { local s:2 = 0x100 | zext(A); SP = zext(s) + 1; }
+:TCS  is emode=0 & op=0x1B  { SP = zext(C) + 1; }
+:TSC  is op=0x3B            { local s:3 = SP - 1; C = s:2; nz(C); }
+:XBA  is op=0xEB            { local t = A; A = B; B = t; nz(A); }
+
+################################################################
+# Stack operations
+################################################################
+
+:PHA  is mflag=1 & op=0x48  { push8(A); }
+:PHA  is mflag=0 & op=0x48  { push16(C); }
+:PLA  is mflag=1 & op=0x68  { pop8(A); nz(A); }
+:PLA  is mflag=0 & op=0x68  { pop16(C); nz(C); }
+:PHX  is xflag=1 & op=0xDA  { push8(XL); }
+:PHX  is xflag=0 & op=0xDA  { push16(X); }
+:PLX  is xflag=1 & op=0xFA  { pop8(XL); XH = 0; nz(XL); }
+:PLX  is xflag=0 & op=0xFA  { pop16(X); nz(X); }
+:PHY  is xflag=1 & op=0x5A  { push8(YL); }
+:PHY  is xflag=0 & op=0x5A  { push16(Y); }
+:PLY  is xflag=1 & op=0x7A  { pop8(YL); YH = 0; nz(YL); }
+:PLY  is xflag=0 & op=0x7A  { pop16(Y); nz(Y); }
+
+:PHB  is op=0x8B  { push8(DBR); }
+:PLB  is op=0xAB  { pop8(DBR); nz(DBR); }
+:PHD  is op=0x0B  { push16(D); }
+:PLD  is op=0x2B  { pop16(D); nz(D); }
+:PHK  is op=0x4B  { local k:3 = inst_start; local kb:1 = k(2); push8(kb); }
+
+# PHP remembers the current M/X context so a matching PLP restores it
+:PHP  is op=0x08  [ savedM = mflag; savedX = xflag; globalset(inst_next, savedM); globalset(inst_next, savedX); ]
+{
+    local p:1 = 0;
+    packP(p);
+    push8(p);
+}
+
+:PLP  is op=0x28  [ mflag = savedM; xflag = savedX; globalset(inst_next, mflag); globalset(inst_next, xflag); ]
+{
+    local p:1 = 0;
+    pop8(p);
+    unpackP(p);
+    clipIndex();
+}
+
+:PEA imm16       is op=0xF4; imm16        { local v:2 = imm16; push16(v); }
+:PEI (imm8)      is op=0xD4; imm8         { pa:3 = zext(D + imm8); local v:2 = *:2 pa; push16(v); }
+:PER reloc       is op=0x62; rel16  [ reloc = (inst_start & 0xFF0000) | ((inst_next + rel16) & 0xFFFF); ]
+{
+    local v:3 = reloc;
+    push16(v:2);
+}
+
+################################################################
+# Status flag instructions and mode switching
+################################################################
+
+:CLC  is op=0x18  [ cknown = 1; globalset(inst_next, cknown); ]  { CF = 0; }
+:SEC  is op=0x38  [ cknown = 2; globalset(inst_next, cknown); ]  { CF = 1; }
+:CLI  is op=0x58  { IF = 0; }
+:SEI  is op=0x78  { IF = 1; }
+:CLV  is op=0xB8  { VF = 0; }
+:CLD  is op=0xD8  { DF = 0; }
+:SED  is op=0xF8  { DF = 1; }
+
+# REP: reset the P bits set in the operand (M and X stay 1 in emulation mode)
+:REP "#"imm8  is emode=0 & op=0xC2; imm8
+    [ mflag = mflag & ~((imm8 >> 5) & 1); xflag = xflag & ~((imm8 >> 4) & 1);
+      globalset(inst_next, mflag); globalset(inst_next, xflag); ]
+{
+    local p:1 = 0;
+    packP(p);
+    p = p & ~imm8;
+    unpackP(p);
+}
+:REP "#"imm8  is emode=1 & op=0xC2; imm8
+{
+    local p:1 = 0;
+    packP(p);
+    p = (p & ~imm8) | 0x30;
+    unpackP(p);
+}
+
+# SEP: set the P bits set in the operand
+:SEP "#"imm8  is op=0xE2; imm8
+    [ mflag = mflag | ((imm8 >> 5) & 1); xflag = xflag | ((imm8 >> 4) & 1);
+      globalset(inst_next, mflag); globalset(inst_next, xflag); ]
+{
+    local p:1 = 0;
+    packP(p);
+    p = p | imm8;
+    unpackP(p);
+    clipIndex();
+}
+
+# XCE: exchange carry and emulation bits. When the carry is known (the
+# previous instruction was CLC or SEC) the mode change is applied to the
+# context: CLC; XCE enters native mode, SEC; XCE enters emulation mode.
+:XCE  is op=0xFB & cknown=1  [ emode = 0; globalset(inst_next, emode); ]
+{
+    local t = CF; CF = EF; EF = t;
+}
+:XCE  is op=0xFB & cknown=2  [ emode = 1; mflag = 1; xflag = 1; globalset(inst_next, emode); globalset(inst_next, mflag); globalset(inst_next, xflag); ]
+{
+    local t = CF; CF = EF; EF = t;
+    MF = 1; XF = 1; XH = 0; YH = 0;
+    local s:3 = SP - 1;
+    s = (s & 0xFF) | 0x100;
+    SP = s + 1;
+}
+:XCE  is op=0xFB
+{
+    local t = CF; CF = EF; EF = t;
+}
+
+################################################################
+# Branches and jumps
+################################################################
+
+:BPL REL8   is op=0x10; REL8   { if (NF == 0) goto REL8; }
+:BMI REL8   is op=0x30; REL8   { if (NF != 0) goto REL8; }
+:BVC REL8   is op=0x50; REL8   { if (VF == 0) goto REL8; }
+:BVS REL8   is op=0x70; REL8   { if (VF != 0) goto REL8; }
+:BRA REL8   is op=0x80; REL8   { goto REL8; }
+:BCC REL8   is op=0x90; REL8   { if (CF == 0) goto REL8; }
+:BCS REL8   is op=0xB0; REL8   { if (CF != 0) goto REL8; }
+:BNE REL8   is op=0xD0; REL8   { if (ZF == 0) goto REL8; }
+:BEQ REL8   is op=0xF0; REL8   { if (ZF != 0) goto REL8; }
+:BRL REL16  is op=0x82; REL16  { goto REL16; }
+
+:JMP JABS   is op=0x4C; JABS   { goto JABS; }
+:JML JLONG  is op=0x5C; JLONG  { goto JLONG; }
+
+# JMP (addr): pointer in bank 0, target in the program bank
+:JMP (imm16)    is op=0x6C; imm16
+{
+    local pa:3 = imm16;
+    local p:2 = *:2 pa;
+    local k:3 = inst_start & 0xFF0000;
+    local tgt:3 = k | zext(p);
+    goto [tgt];
+}
+
+# JMP (addr,X): pointer in the program bank
+:JMP (imm16,X)  is op=0x7C & X; imm16
+{
+    local k:3 = inst_start & 0xFF0000;
+    local pa:3 = k | zext(imm16 + X);
+    local p:2 = *:2 pa;
+    local tgt:3 = k | zext(p);
+    goto [tgt];
+}
+
+# JML [addr]: 24-bit pointer in bank 0
+:JML [imm16]    is op=0xDC; imm16
+{
+    local pa:3 = imm16;
+    local tgt:3 = *:3 pa;
+    goto [tgt];
+}
+
+:JSR JABS       is op=0x20; JABS
+{
+    local r:3 = inst_next - 1;
+    push16(r:2);
+    call JABS;
+}
+
+:JSR (imm16,X)  is op=0xFC & X; imm16
+{
+    local r:3 = inst_next - 1;
+    push16(r:2);
+    local k:3 = inst_start & 0xFF0000;
+    local pa:3 = k | zext(imm16 + X);
+    local p:2 = *:2 pa;
+    local tgt:3 = k | zext(p);
+    call [tgt];
+}
+
+:JSL JLONG      is op=0x22; JLONG
+{
+    local r:3 = inst_next - 1;
+    push24(r);
+    call JLONG;
+    # Decompiler view only: every function uses one calling convention whose
+    # extrapop (2) matches RTS; the RTL that ends a JSL target pops one byte
+    # more, which this adds back. An emulator branches at the call and never
+    # executes this op, so emulation stays exact.
+    SP = SP + 1;
+}
+
+:RTS  is op=0x60
+{
+    local r:2 = 0;
+    pop16(r);
+    local k:3 = inst_start & 0xFF0000;
+    local tgt:3 = k | zext(r + 1);
+    return [tgt];
+}
+
+:RTL  is op=0x6B
+{
+    local r:3 = 0;
+    pop24(r);
+    local tgt:3 = (r & 0xFF0000) | zext(r:2 + 1);
+    return [tgt];
+}
+
+:RTI  is emode=0 & op=0x40
+{
+    local p:1 = 0;
+    pop8(p);
+    unpackP(p);
+    clipIndex();
+    local r:3 = 0;
+    pop24(r);
+    return [r];
+}
+:RTI  is emode=1 & op=0x40
+{
+    local p:1 = 0;
+    pop8(p);
+    unpackP(p);
+    local r:2 = 0;
+    pop16(r);
+    local tgt:3 = zext(r);
+    return [tgt];
+}
+
+################################################################
+# Interrupts, block moves, miscellaneous
+################################################################
+
+:BRK "#"imm8  is op=0x00; imm8  { softwareInterrupt(imm8:1); }
+:COP "#"imm8  is op=0x02; imm8  { coprocessorInterrupt(imm8:1); }
+:WDM "#"imm8  is op=0x42; imm8  { }
+:NOP          is op=0xEA        { }
+:WAI          is op=0xCB        { waitForInterrupt(); }
+:STP          is op=0xDB        { stopClock(); goto inst_start; }
+
+# Block moves. Machine code: opcode, destination bank, source bank.
+# Shown in WDC order: MVN srcbank,dstbank. One byte is moved per
+# execution; the instruction repeats until C wraps to 0xFFFF.
+:MVN srcbk,dstbk  is xflag=0 & op=0x54; dstbk & srcbk
+{
+    DBR = dstbk;
+    local sb:3 = srcbk;
+    local db:3 = dstbk;
+    local s:3 = (sb << 16) | zext(X);
+    local d:3 = (db << 16) | zext(Y);
+    *:1 d = *:1 s;
+    X = X + 1;
+    Y = Y + 1;
+    C = C - 1;
+    if (C != 0xFFFF) goto inst_start;
+}
+:MVN srcbk,dstbk  is xflag=1 & op=0x54; dstbk & srcbk
+{
+    DBR = dstbk;
+    local sb:3 = srcbk;
+    local db:3 = dstbk;
+    local s:3 = (sb << 16) | zext(X);
+    local d:3 = (db << 16) | zext(Y);
+    *:1 d = *:1 s;
+    XL = XL + 1;
+    YL = YL + 1;
+    C = C - 1;
+    if (C != 0xFFFF) goto inst_start;
+}
+:MVP srcbk,dstbk  is xflag=0 & op=0x44; dstbk & srcbk
+{
+    DBR = dstbk;
+    local sb:3 = srcbk;
+    local db:3 = dstbk;
+    local s:3 = (sb << 16) | zext(X);
+    local d:3 = (db << 16) | zext(Y);
+    *:1 d = *:1 s;
+    X = X - 1;
+    Y = Y - 1;
+    C = C - 1;
+    if (C != 0xFFFF) goto inst_start;
+}
+:MVP srcbk,dstbk  is xflag=1 & op=0x44; dstbk & srcbk
+{
+    DBR = dstbk;
+    local sb:3 = srcbk;
+    local db:3 = dstbk;
+    local s:3 = (sb << 16) | zext(X);
+    local d:3 = (db << 16) | zext(Y);
+    *:1 d = *:1 s;
+    XL = XL - 1;
+    YL = YL - 1;
+    C = C - 1;
+    if (C != 0xFFFF) goto inst_start;
+}
