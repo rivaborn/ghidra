@@ -1,0 +1,618 @@
+# sleigh specification file for the Sharp LR35902 / SM83
+# (the CPU core of the Nintendo Game Boy and Game Boy Color)
+#
+# Structure adapted from Ghidra's Zilog Z80 specification (z80.slaspec).
+# The SM83 is not a Z80: it has no IX/IY, no DD/ED/FD prefixes, no alternate
+# register set, no I/O space and no sign/parity flags. It adds the (HL+)/(HL-)
+# loads, the 0xFF00-page loads (LDH), LD (a16),SP, ADD SP,e8, LD HL,SP+e8,
+# SWAP, STOP and RETI.
+#
+# The flags live in the upper nibble of F (Z=bit7, N=bit6, H=bit5, C=bit4;
+# bits 3-0 always read as 0). For a readable decompilation each flag is held in
+# its own one-byte register (ZF NF HF CF); F is only assembled from them by
+# PUSH AF and split back into them by POP AF, the only instructions that
+# access F directly.
+
+define endian=little;
+define alignment=1;
+
+define space ram      type=ram_space      size=2  default;
+define space register type=register_space size=1;
+
+define register offset=0x00 size=1 [ F A C B E D L H ];
+define register offset=0x00 size=2 [ AF  BC  DE  HL ];
+define register offset=0x10 size=2 [ PC SP ];
+define register offset=0x20 size=1 [ ZF NF HF CF ];
+
+define token opbyte (8)
+	op0_8    = (0,7)
+	op6_2    = (6,7)
+	rp4_2    = (4,5)
+	qq4_2    = (4,5)
+	bits0_4  = (0,3)
+	reg3_3   = (3,5)
+	bits3_3  = (3,5)
+	bitnum   = (3,5)
+	bit5     = (5,5)
+	cond3_2  = (3,4)
+	reg0_3   = (0,2)
+	bits0_3  = (0,2)
+;
+
+define token data8 (8)
+	imm8  = (0,7)
+	sign8 = (7,7)
+	simm8 = (0,7) signed
+;
+
+define token data16 (16)
+	imm16 = (0,15)
+;
+
+attach variables [ reg0_3 reg3_3 ] [ B C D E H L _ A ];
+attach variables [ rp4_2 ]         [ BC DE HL SP ];
+attach variables [ qq4_2 ]         [ BC DE HL _ ];
+
+################################################################
+# Pseudo instructions
+################################################################
+
+define pcodeop disableInterrupts;
+define pcodeop enableInterrupts;
+define pcodeop halt;
+define pcodeop stop;
+
+################################################################
+# Macros
+################################################################
+
+macro push16(val16) {
+	SP = SP - 2;
+	*:2 SP = val16;
+}
+
+macro pop16(ret16) {
+	ret16 = *:2 SP;
+	SP = SP + 2;
+}
+
+# A = A + v
+macro doAdd(v) {
+	local a:1 = A;
+	HF = ((a & 0xF) + (v & 0xF)) > 0xF;
+	CF = carry(a, v);
+	A = a + v;
+	ZF = (A == 0);
+	NF = 0;
+}
+
+# A = A + v + C
+macro doAdc(v) {
+	local a:1 = A;
+	local c:1 = CF;
+	HF = ((a & 0xF) + (v & 0xF) + c) > 0xF;
+	local wide:2 = zext(a) + zext(v) + zext(c);
+	CF = wide > 0xFF;
+	A = wide:1;
+	ZF = (A == 0);
+	NF = 0;
+}
+
+# A = A - v
+macro doSub(v) {
+	local a:1 = A;
+	HF = (a & 0xF) < (v & 0xF);
+	CF = a < v;
+	A = a - v;
+	ZF = (A == 0);
+	NF = 1;
+}
+
+# A = A - v - C
+macro doSbc(v) {
+	local a:1 = A;
+	local c:1 = CF;
+	HF = (a & 0xF) < ((v & 0xF) + c);
+	local a16:2 = zext(a);
+	local s16:2 = zext(v) + zext(c);
+	CF = a16 < s16;
+	A = a - v - c;
+	ZF = (A == 0);
+	NF = 1;
+}
+
+macro doAnd(v) {
+	A = A & v;
+	ZF = (A == 0);
+	NF = 0;
+	HF = 1;
+	CF = 0;
+}
+
+macro doXor(v) {
+	A = A ^ v;
+	ZF = (A == 0);
+	NF = 0;
+	HF = 0;
+	CF = 0;
+}
+
+macro doOr(v) {
+	A = A | v;
+	ZF = (A == 0);
+	NF = 0;
+	HF = 0;
+	CF = 0;
+}
+
+# flags of A - v, A unchanged
+macro doCp(v) {
+	local a:1 = A;
+	ZF = (a == v);
+	NF = 1;
+	HF = (a & 0xF) < (v & 0xF);
+	CF = a < v;
+}
+
+# flags of the CB shift/rotate group: Z from the result, N=0, H=0 (C set by caller)
+macro shiftFlags(res) {
+	ZF = (res == 0);
+	NF = 0;
+	HF = 0;
+}
+
+################################################################
+# Operands
+################################################################
+
+# 8-bit operand in bits 2-0: B C D E H L (HL) A
+r8s: reg0_3  is reg0_3               { export reg0_3; }
+r8s: (HL)    is bits0_3=6 & HL       { export *:1 HL; }
+
+# 8-bit operand in bits 5-3: B C D E H L (HL) A
+r8d: reg3_3  is reg3_3               { export reg3_3; }
+r8d: (HL)    is bits3_3=6 & HL       { export *:1 HL; }
+
+Addr16: imm16      is imm16          { export *:1 imm16; }
+Mem8:   (imm16)    is imm16          { export *:1 imm16; }
+Mem16:  (imm16)    is imm16          { export *:2 imm16; }
+
+# LDH (a8): 0xFF00 + a8
+HiMem8: (loc)      is imm8   [ loc = 0xFF00 + imm8; ]   { export *:1 loc; }
+
+RelAddr8: loc      is simm8  [ loc = inst_next + simm8; ]   { export *:1 loc; }
+
+RstAddr: loc       is bits3_3 [ loc = bits3_3 << 3; ]       { export *:1 loc; }
+
+# SP+e8 for LD HL,SP+e8
+SPrel: SP+simm8    is SP & simm8 & sign8=0                    { export SP; }
+SPrel: SP-val      is SP & simm8 & sign8=1 [ val = -simm8; ] { export SP; }
+
+# bit number of BIT/RES/SET, shown in decimal (BIT 7,A)
+bitN: "0"  is bitnum=0  { export 0:1; }
+bitN: "1"  is bitnum=1  { export 1:1; }
+bitN: "2"  is bitnum=2  { export 2:1; }
+bitN: "3"  is bitnum=3  { export 3:1; }
+bitN: "4"  is bitnum=4  { export 4:1; }
+bitN: "5"  is bitnum=5  { export 5:1; }
+bitN: "6"  is bitnum=6  { export 6:1; }
+bitN: "7"  is bitnum=7  { export 7:1; }
+
+cc: "NZ"  is cond3_2=0  { c:1 = (ZF == 0); export c; }
+cc: "Z"   is cond3_2=1  { c:1 = (ZF != 0); export c; }
+cc: "NC"  is cond3_2=2  { c:1 = (CF == 0); export c; }
+cc: "C"   is cond3_2=3  { c:1 = (CF != 0); export c; }
+
+################################################################
+# 8-bit loads
+################################################################
+
+:LD r8d,r8s          is op6_2=0x1 & r8d & r8s & op0_8!=0x76 {
+	r8d = r8s;
+}
+
+:LD r8d,imm8         is op6_2=0x0 & r8d & bits0_3=0x6; imm8 {
+	r8d = imm8;
+}
+
+:LD (BC),A           is op0_8=0x02 & BC & A { *:1 BC = A; }
+:LD (DE),A           is op0_8=0x12 & DE & A { *:1 DE = A; }
+:LD (HL+),A          is op0_8=0x22 & HL & A { *:1 HL = A; HL = HL + 1; }
+:LD (HL-),A          is op0_8=0x32 & HL & A { *:1 HL = A; HL = HL - 1; }
+
+:LD A,(BC)           is op0_8=0x0a & BC & A { A = *:1 BC; }
+:LD A,(DE)           is op0_8=0x1a & DE & A { A = *:1 DE; }
+:LD A,(HL+)          is op0_8=0x2a & HL & A { A = *:1 HL; HL = HL + 1; }
+:LD A,(HL-)          is op0_8=0x3a & HL & A { A = *:1 HL; HL = HL - 1; }
+
+:LD Mem8,A           is op0_8=0xea & A; Mem8 { Mem8 = A; }
+:LD A,Mem8           is op0_8=0xfa & A; Mem8 { A = Mem8; }
+
+:LDH HiMem8,A        is op0_8=0xe0 & A; HiMem8 { HiMem8 = A; }
+:LDH A,HiMem8        is op0_8=0xf0 & A; HiMem8 { A = HiMem8; }
+
+:LD (C),A            is op0_8=0xe2 & C & A {
+	ptr:2 = 0xFF00 + zext(C);
+	*:1 ptr = A;
+}
+
+:LD A,(C)            is op0_8=0xf2 & C & A {
+	ptr:2 = 0xFF00 + zext(C);
+	A = *:1 ptr;
+}
+
+################################################################
+# 16-bit loads, stack
+################################################################
+
+:LD rp4_2,imm16      is op6_2=0x0 & rp4_2 & bits0_4=0x1; imm16 {
+	rp4_2 = imm16;
+}
+
+:LD Mem16,SP         is op0_8=0x08 & SP; Mem16 {
+	Mem16 = SP;
+}
+
+:LD SP,HL            is op0_8=0xf9 & SP & HL {
+	SP = HL;
+}
+
+:LD HL,SPrel         is op0_8=0xf8 & HL; SPrel & simm8 {
+	local u:1 = simm8;
+	local sp:2 = SPrel;
+	HF = ((sp & 0xF) + zext(u & 0xF)) > 0xF;
+	CF = ((sp & 0xFF) + zext(u)) > 0xFF;
+	ZF = 0;
+	NF = 0;
+	HL = sp + simm8;
+}
+
+:PUSH qq4_2          is op6_2=0x3 & qq4_2 & bits0_4=0x5 {
+	push16(qq4_2);
+}
+
+:PUSH AF             is op0_8=0xf5 & AF {
+	F = (ZF << 7) | (NF << 6) | (HF << 5) | (CF << 4);
+	push16(AF);
+}
+
+:POP qq4_2           is op6_2=0x3 & qq4_2 & bits0_4=0x1 {
+	pop16(qq4_2);
+}
+
+:POP AF              is op0_8=0xf1 & AF {
+	pop16(AF);
+	F = F & 0xF0;
+	ZF = (F >> 7) & 1;
+	NF = (F >> 6) & 1;
+	HF = (F >> 5) & 1;
+	CF = (F >> 4) & 1;
+}
+
+################################################################
+# 8-bit arithmetic / logic
+################################################################
+
+:ADD A,r8s           is op6_2=0x2 & bits3_3=0x0 & r8s & A { local v:1 = r8s; doAdd(v); }
+:ADC A,r8s           is op6_2=0x2 & bits3_3=0x1 & r8s & A { local v:1 = r8s; doAdc(v); }
+:SUB r8s             is op6_2=0x2 & bits3_3=0x2 & r8s     { local v:1 = r8s; doSub(v); }
+:SBC A,r8s           is op6_2=0x2 & bits3_3=0x3 & r8s & A { local v:1 = r8s; doSbc(v); }
+:AND r8s             is op6_2=0x2 & bits3_3=0x4 & r8s     { local v:1 = r8s; doAnd(v); }
+:XOR r8s             is op6_2=0x2 & bits3_3=0x5 & r8s     { local v:1 = r8s; doXor(v); }
+:OR r8s              is op6_2=0x2 & bits3_3=0x6 & r8s     { local v:1 = r8s; doOr(v); }
+:CP r8s              is op6_2=0x2 & bits3_3=0x7 & r8s     { local v:1 = r8s; doCp(v); }
+
+:ADD A,imm8          is op0_8=0xc6 & A; imm8 { local v:1 = imm8; doAdd(v); }
+:ADC A,imm8          is op0_8=0xce & A; imm8 { local v:1 = imm8; doAdc(v); }
+:SUB imm8            is op0_8=0xd6; imm8     { local v:1 = imm8; doSub(v); }
+:SBC A,imm8          is op0_8=0xde & A; imm8 { local v:1 = imm8; doSbc(v); }
+:AND imm8            is op0_8=0xe6; imm8     { local v:1 = imm8; doAnd(v); }
+:XOR imm8            is op0_8=0xee; imm8     { local v:1 = imm8; doXor(v); }
+:OR imm8             is op0_8=0xf6; imm8     { local v:1 = imm8; doOr(v); }
+:CP imm8             is op0_8=0xfe; imm8     { local v:1 = imm8; doCp(v); }
+
+:INC r8d             is op6_2=0x0 & r8d & bits0_3=0x4 {
+	local v:1 = r8d;
+	HF = (v & 0xF) == 0xF;
+	v = v + 1;
+	r8d = v;
+	ZF = (v == 0);
+	NF = 0;
+}
+
+:DEC r8d             is op6_2=0x0 & r8d & bits0_3=0x5 {
+	local v:1 = r8d;
+	HF = (v & 0xF) == 0;
+	v = v - 1;
+	r8d = v;
+	ZF = (v == 0);
+	NF = 1;
+}
+
+# Decimal adjust: exact SM83 behaviour (depends on N, H, C only; no parity)
+:DAA                 is op0_8=0x27 {
+	local a:1 = A;
+	local adj:1 = 0;
+	local c:1 = CF;
+	if (NF != 0) goto <subtract>;
+	if ((CF == 0) && (a <= 0x99)) goto <addLow>;
+	adj = 0x60;
+	c = 1;
+<addLow>
+	if ((HF == 0) && ((a & 0xF) <= 0x9)) goto <addDone>;
+	adj = adj | 0x06;
+<addDone>
+	a = a + adj;
+	goto <done>;
+<subtract>
+	if (CF == 0) goto <subLow>;
+	adj = 0x60;
+<subLow>
+	if (HF == 0) goto <subDone>;
+	adj = adj | 0x06;
+<subDone>
+	a = a - adj;
+<done>
+	A = a;
+	CF = c;
+	ZF = (a == 0);
+	HF = 0;
+}
+
+:CPL                 is op0_8=0x2f {
+	A = ~A;
+	NF = 1;
+	HF = 1;
+}
+
+:SCF                 is op0_8=0x37 {
+	CF = 1;
+	NF = 0;
+	HF = 0;
+}
+
+:CCF                 is op0_8=0x3f {
+	CF = (CF == 0);
+	NF = 0;
+	HF = 0;
+}
+
+################################################################
+# 16-bit arithmetic
+################################################################
+
+:ADD HL,rp4_2        is op6_2=0x0 & rp4_2 & bits0_4=0x9 & HL {
+	local hl:2 = HL;
+	local v:2 = rp4_2;
+	HF = ((hl & 0xFFF) + (v & 0xFFF)) > 0xFFF;
+	CF = carry(hl, v);
+	NF = 0;
+	HL = hl + v;
+}
+
+:INC rp4_2           is op6_2=0x0 & rp4_2 & bits0_4=0x3 {
+	rp4_2 = rp4_2 + 1;
+}
+
+:DEC rp4_2           is op6_2=0x0 & rp4_2 & bits0_4=0xb {
+	rp4_2 = rp4_2 - 1;
+}
+
+:ADD SP,simm8        is op0_8=0xe8 & SP; simm8 {
+	local u:1 = simm8;
+	local sp:2 = SP;
+	HF = ((sp & 0xF) + zext(u & 0xF)) > 0xF;
+	CF = ((sp & 0xFF) + zext(u)) > 0xFF;
+	ZF = 0;
+	NF = 0;
+	SP = sp + simm8;
+}
+
+################################################################
+# Rotates on A (Z is always cleared)
+################################################################
+
+:RLCA                is op0_8=0x07 {
+	local a:1 = A;
+	CF = a >> 7;
+	A = (a << 1) | (a >> 7);
+	ZF = 0;
+	NF = 0;
+	HF = 0;
+}
+
+:RLA                 is op0_8=0x17 {
+	local a:1 = A;
+	local c:1 = CF;
+	CF = a >> 7;
+	A = (a << 1) | c;
+	ZF = 0;
+	NF = 0;
+	HF = 0;
+}
+
+:RRCA                is op0_8=0x0f {
+	local a:1 = A;
+	CF = a & 1;
+	A = (a >> 1) | (a << 7);
+	ZF = 0;
+	NF = 0;
+	HF = 0;
+}
+
+:RRA                 is op0_8=0x1f {
+	local a:1 = A;
+	local c:1 = CF;
+	CF = a & 1;
+	A = (a >> 1) | (c << 7);
+	ZF = 0;
+	NF = 0;
+	HF = 0;
+}
+
+################################################################
+# CB prefix: rotates, shifts, SWAP, BIT, RES, SET
+################################################################
+
+:RLC r8s             is op0_8=0xcb; op6_2=0x0 & bits3_3=0x0 & r8s {
+	local v:1 = r8s;
+	CF = v >> 7;
+	v = (v << 1) | (v >> 7);
+	r8s = v;
+	shiftFlags(v);
+}
+
+:RRC r8s             is op0_8=0xcb; op6_2=0x0 & bits3_3=0x1 & r8s {
+	local v:1 = r8s;
+	CF = v & 1;
+	v = (v >> 1) | (v << 7);
+	r8s = v;
+	shiftFlags(v);
+}
+
+:RL r8s              is op0_8=0xcb; op6_2=0x0 & bits3_3=0x2 & r8s {
+	local v:1 = r8s;
+	local c:1 = CF;
+	CF = v >> 7;
+	v = (v << 1) | c;
+	r8s = v;
+	shiftFlags(v);
+}
+
+:RR r8s              is op0_8=0xcb; op6_2=0x0 & bits3_3=0x3 & r8s {
+	local v:1 = r8s;
+	local c:1 = CF;
+	CF = v & 1;
+	v = (v >> 1) | (c << 7);
+	r8s = v;
+	shiftFlags(v);
+}
+
+:SLA r8s             is op0_8=0xcb; op6_2=0x0 & bits3_3=0x4 & r8s {
+	local v:1 = r8s;
+	CF = v >> 7;
+	v = v << 1;
+	r8s = v;
+	shiftFlags(v);
+}
+
+:SRA r8s             is op0_8=0xcb; op6_2=0x0 & bits3_3=0x5 & r8s {
+	local v:1 = r8s;
+	CF = v & 1;
+	v = v s>> 1;
+	r8s = v;
+	shiftFlags(v);
+}
+
+:SWAP r8s            is op0_8=0xcb; op6_2=0x0 & bits3_3=0x6 & r8s {
+	local v:1 = r8s;
+	v = (v << 4) | (v >> 4);
+	r8s = v;
+	shiftFlags(v);
+	CF = 0;
+}
+
+:SRL r8s             is op0_8=0xcb; op6_2=0x0 & bits3_3=0x7 & r8s {
+	local v:1 = r8s;
+	CF = v & 1;
+	v = v >> 1;
+	r8s = v;
+	shiftFlags(v);
+}
+
+:BIT bitN,r8s        is op0_8=0xcb; op6_2=0x1 & bitN & r8s {
+	local mask:1 = 1 << bitN;
+	ZF = (r8s & mask) == 0;
+	NF = 0;
+	HF = 1;
+}
+
+:RES bitN,r8s        is op0_8=0xcb; op6_2=0x2 & bitN & r8s {
+	local mask:1 = ~(1 << bitN);
+	r8s = r8s & mask;
+}
+
+:SET bitN,r8s        is op0_8=0xcb; op6_2=0x3 & bitN & r8s {
+	local mask:1 = 1 << bitN;
+	r8s = r8s | mask;
+}
+
+################################################################
+# Control
+################################################################
+
+:NOP                 is op0_8=0x00 { }
+
+:HALT                is op0_8=0x76 {
+	halt();
+}
+
+# STOP is encoded as 10 00; the second byte is part of the instruction.
+:STOP                is op0_8=0x10; imm8=0x00 {
+	stop();
+}
+
+:STOP imm8           is op0_8=0x10; imm8 {
+	stop();
+}
+
+:DI                  is op0_8=0xf3 {
+	disableInterrupts();
+}
+
+:EI                  is op0_8=0xfb {
+	enableInterrupts();
+}
+
+:JP Addr16           is op0_8=0xc3; Addr16 {
+	goto Addr16;
+}
+
+:JP cc,Addr16        is op6_2=0x3 & bit5=0 & cc & bits0_3=0x2; Addr16 {
+	if (cc) goto Addr16;
+}
+
+:JP HL               is op0_8=0xe9 & HL {
+	goto [HL];
+}
+
+:JR RelAddr8         is op0_8=0x18; RelAddr8 {
+	goto RelAddr8;
+}
+
+:JR cc,RelAddr8      is op6_2=0x0 & bit5=1 & cc & bits0_3=0x0; RelAddr8 {
+	if (cc) goto RelAddr8;
+}
+
+:CALL Addr16         is op0_8=0xcd; Addr16 {
+	push16(&:2 inst_next);
+	call Addr16;
+}
+
+:CALL cc,Addr16      is op6_2=0x3 & bit5=0 & cc & bits0_3=0x4; Addr16 {
+	if (!cc) goto inst_next;
+	push16(&:2 inst_next);
+	call Addr16;
+}
+
+:RET                 is op0_8=0xc9 {
+	pop16(PC);
+	return [PC];
+}
+
+:RET cc              is op6_2=0x3 & bit5=0 & cc & bits0_3=0x0 {
+	if (!cc) goto inst_next;
+	pop16(PC);
+	return [PC];
+}
+
+:RETI                is op0_8=0xd9 {
+	enableInterrupts();
+	pop16(PC);
+	return [PC];
+}
+
+:RST RstAddr         is op6_2=0x3 & RstAddr & bits0_3=0x7 {
+	push16(&:2 inst_next);
+	call RstAddr;
+}

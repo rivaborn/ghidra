@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Processor specification for the Sharp LR35902 / SM83 (Game Boy, Game Boy Color).
+
+     The cartridge ROM (0000-7FFF; 4000-7FFF is the switchable bank) is the
+     imported file, so it is not declared here. The other regions of the Game Boy
+     memory map are created as uninitialized blocks; I/O (FF00-FF7F) and IE (FFFF)
+     are volatile. The hardware registers, interrupt vectors, RST vectors and the
+     cartridge entry point are named. -->
+<processor_spec>
+  <programcounter register="PC"/>
+
+  <default_symbols>
+    <symbol name="RST_00" address="ram:0000" entry="true"/>
+    <symbol name="RST_08" address="ram:0008" entry="true"/>
+    <symbol name="RST_10" address="ram:0010" entry="true"/>
+    <symbol name="RST_18" address="ram:0018" entry="true"/>
+    <symbol name="RST_20" address="ram:0020" entry="true"/>
+    <symbol name="RST_28" address="ram:0028" entry="true"/>
+    <symbol name="RST_30" address="ram:0030" entry="true"/>
+    <symbol name="RST_38" address="ram:0038" entry="true"/>
+    <symbol name="INT_VBLANK" address="ram:0040" entry="true" description="VBlank interrupt"/>
+    <symbol name="INT_STAT"   address="ram:0048" entry="true" description="LCD STAT interrupt"/>
+    <symbol name="INT_TIMER"  address="ram:0050" entry="true" description="timer interrupt"/>
+    <symbol name="INT_SERIAL" address="ram:0058" entry="true" description="serial interrupt"/>
+    <symbol name="INT_JOYPAD" address="ram:0060" entry="true" description="joypad interrupt"/>
+    <symbol name="ENTRY"      address="ram:0100" entry="true" description="cartridge entry point"/>
+    <symbol name="CART_HEADER" address="ram:0104" description="Nintendo logo, title and cartridge header (0104-014F)"/>
+
+    <symbol name="JOYP" address="ram:FF00" description="P1/JOYP: joypad"/>
+    <symbol name="SB" address="ram:FF01" description="serial transfer data"/>
+    <symbol name="SC" address="ram:FF02" description="serial transfer control"/>
+    <symbol name="DIV" address="ram:FF04" description="divider register"/>
+    <symbol name="TIMA" address="ram:FF05" description="timer counter"/>
+    <symbol name="TMA" address="ram:FF06" description="timer modulo"/>
+    <symbol name="TAC" address="ram:FF07" description="timer control"/>
+    <symbol name="IF" address="ram:FF0F" description="interrupt flag"/>
+    <symbol name="NR10" address="ram:FF10" description="sound ch1 sweep"/>
+    <symbol name="NR11" address="ram:FF11" description="sound ch1 length timer / duty"/>
+    <symbol name="NR12" address="ram:FF12" description="sound ch1 volume / envelope"/>
+    <symbol name="NR13" address="ram:FF13" description="sound ch1 period low"/>
+    <symbol name="NR14" address="ram:FF14" description="sound ch1 period high / control"/>
+    <symbol name="NR21" address="ram:FF16" description="sound ch2 length timer / duty"/>
+    <symbol name="NR22" address="ram:FF17" description="sound ch2 volume / envelope"/>
+    <symbol name="NR23" address="ram:FF18" description="sound ch2 period low"/>
+    <symbol name="NR24" address="ram:FF19" description="sound ch2 period high / control"/>
+    <symbol name="NR30" address="ram:FF1A" description="sound ch3 DAC enable"/>
+    <symbol name="NR31" address="ram:FF1B" description="sound ch3 length timer"/>
+    <symbol name="NR32" address="ram:FF1C" description="sound ch3 output level"/>
+    <symbol name="NR33" address="ram:FF1D" description="sound ch3 period low"/>
+    <symbol name="NR34" address="ram:FF1E" description="sound ch3 period high / control"/>
+    <symbol name="NR41" address="ram:FF20" description="sound ch4 length timer"/>
+    <symbol name="NR42" address="ram:FF21" description="sound ch4 volume / envelope"/>
+    <symbol name="NR43" address="ram:FF22" description="sound ch4 frequency / randomness"/>
+    <symbol name="NR44" address="ram:FF23" description="sound ch4 control"/>
+    <symbol name="NR50" address="ram:FF24" description="master volume / VIN panning"/>
+    <symbol name="NR51" address="ram:FF25" description="sound panning"/>
+    <symbol name="NR52" address="ram:FF26" description="sound on/off"/>
+    <symbol name="WAVE_RAM" address="ram:FF30" description="sound ch3 wave pattern RAM (FF30-FF3F)"/>
+    <symbol name="LCDC" address="ram:FF40" description="LCD control"/>
+    <symbol name="STAT" address="ram:FF41" description="LCD status"/>
+    <symbol name="SCY" address="ram:FF42" description="background viewport Y"/>
+    <symbol name="SCX" address="ram:FF43" description="background viewport X"/>
+    <symbol name="LY" address="ram:FF44" description="LCD Y coordinate"/>
+    <symbol name="LYC" address="ram:FF45" description="LY compare"/>
+    <symbol name="DMA" address="ram:FF46" description="OAM DMA source address / start"/>
+    <symbol name="BGP" address="ram:FF47" description="BG palette data (DMG)"/>
+    <symbol name="OBP0" address="ram:FF48" description="OBJ palette 0 data (DMG)"/>
+    <symbol name="OBP1" address="ram:FF49" description="OBJ palette 1 data (DMG)"/>
+    <symbol name="WY" address="ram:FF4A" description="window Y position"/>
+    <symbol name="WX" address="ram:FF4B" description="window X position + 7"/>
+    <symbol name="KEY0" address="ram:FF4C" description="CGB: CPU mode select (boot ROM only)"/>
+    <symbol name="KEY1" address="ram:FF4D" description="CGB: prepare speed switch"/>
+    <symbol name="VBK" address="ram:FF4F" description="CGB: VRAM bank"/>
+    <symbol name="BANK" address="ram:FF50" description="boot ROM disable"/>
+    <symbol name="HDMA1" address="ram:FF51" description="CGB: VRAM DMA source high"/>
+    <symbol name="HDMA2" address="ram:FF52" description="CGB: VRAM DMA source low"/>
+    <symbol name="HDMA3" address="ram:FF53" description="CGB: VRAM DMA destination high"/>
+    <symbol name="HDMA4" address="ram:FF54" description="CGB: VRAM DMA destination low"/>
+    <symbol name="HDMA5" address="ram:FF55" description="CGB: VRAM DMA length / mode / start"/>
+    <symbol name="RP" address="ram:FF56" description="CGB: infrared communications port"/>
+    <symbol name="BCPS" address="ram:FF68" description="CGB: background palette specification (BGPI)"/>
+    <symbol name="BCPD" address="ram:FF69" description="CGB: background palette data (BGPD)"/>
+    <symbol name="OCPS" address="ram:FF6A" description="CGB: OBJ palette specification (OBPI)"/>
+    <symbol name="OCPD" address="ram:FF6B" description="CGB: OBJ palette data (OBPD)"/>
+    <symbol name="OPRI" address="ram:FF6C" description="CGB: object priority mode"/>
+    <symbol name="SVBK" address="ram:FF70" description="CGB: WRAM bank"/>
+    <symbol name="PCM12" address="ram:FF76" description="CGB: audio digital outputs 1 and 2"/>
+    <symbol name="PCM34" address="ram:FF77" description="CGB: audio digital outputs 3 and 4"/>
+    <symbol name="IE" address="ram:FFFF" description="interrupt enable"/>
+  </default_symbols>
+
+  <default_memory_blocks>
+    <memory_block name="VRAM"   start_address="ram:8000" length="0x2000" mode="rw"  initialized="false"/>
+    <memory_block name="SRAM"   start_address="ram:a000" length="0x2000" mode="rw"  initialized="false"/>
+    <memory_block name="WRAM0"  start_address="ram:c000" length="0x1000" mode="rw"  initialized="false"/>
+    <memory_block name="WRAMX"  start_address="ram:d000" length="0x1000" mode="rw"  initialized="false"/>
+    <memory_block name="ECHO"   start_address="ram:e000" length="0x1e00" mode="rw"  initialized="false"/>
+    <memory_block name="OAM"    start_address="ram:fe00" length="0xa0"   mode="rw"  initialized="false"/>
+    <memory_block name="IO"     start_address="ram:ff00" length="0x80"   mode="rwv" initialized="false"/>
+    <memory_block name="HRAM"   start_address="ram:ff80" length="0x7f"   mode="rwx" initialized="false"/>
+    <memory_block name="IE_REG" start_address="ram:ffff" length="0x1"    mode="rwv" initialized="false"/>
+  </default_memory_blocks>
+</processor_spec>
