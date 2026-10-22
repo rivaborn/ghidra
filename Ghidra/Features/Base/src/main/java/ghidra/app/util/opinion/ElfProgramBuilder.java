@@ -434,7 +434,15 @@ class ElfProgramBuilder extends MemorySectionResolver implements ElfLoadHelper {
 				isRelocatable = true;
 				break;
 			default:
-				elfFileType = "unknown";
+				// PS4/PS5 types: segments may be placed anywhere (ASLR), like ET_DYN
+				elfFileType = elf.getPs4FileTypeName();
+				if (elfFileType != null) {
+					isRelocatable = elf.e_type() != ElfHeader.ET_SCE_EXEC &&
+						elf.e_type() != ElfHeader.ET_SCE_REPLAY_EXEC;
+				}
+				else {
+					elfFileType = "unknown";
+				}
 				break;
 		}
 		props.setString(ElfLoader.ELF_FILE_TYPE_PROPERTY, elfFileType);
