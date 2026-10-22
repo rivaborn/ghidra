@@ -1,0 +1,10 @@
+##VERSION: 2.0
+Module.manifest||GHIDRA||||END|
+README.md||GHIDRA||||END|
+data/languages/ps2vu.cspec||GHIDRA||||END|
+data/languages/ps2vu.ldefs||GHIDRA||||END|
+data/languages/ps2vu.slaspec||GHIDRA||||END|
+data/languages/ps2vu0.pspec||GHIDRA||||END|
+data/languages/ps2vu1.pspec||GHIDRA||||END|
+data/languages/ps2vu_lower.sinc||GHIDRA||||END|
+data/languages/ps2vu_upper.sinc||GHIDRA||||END|

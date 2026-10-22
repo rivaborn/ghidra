@@ -1,0 +1,495 @@
+# ###
+# IP: GHIDRA
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ###
+
+
+#
+# PlayStation 2 Vector Unit, micro mode: lower instructions.
+#
+# Encoding (lower word = bits 31..0 of the LIW, at the LIW address):
+#   op7(7) dest(4) ft/it(5) fs/is(5) fd/id(5) op6(6)       (op7 = 0x40: register forms)
+#   op6 0x3C..0x3F selects the second table, index = fd * 4 + (op6 & 3).
+# VU data memory is addressed in quadwords: an effective address (vi + imm) is scaled by 16
+# into the byte-addressed vumem space (fields x, y, z, w at +0, +4, +8, +12).
+# Integer registers are 16 bits; vi0 reads as 0 and vf0 reads as (0, 0, 0, 1.0).
+
+
+LNB: "lq"^LDEST l_ft, l_imm11^"("^lISr^")"
+	is l_op7=0x00 & LDEST & l_dx & l_dy & l_dz & l_dw & l_ft & l_ftx & l_fty & l_ftz & l_ftw & l_imm11 & lISr
+{
+	local a:4 = (zext(lISr) + l_imm11) * 16;
+	if (l_dx == 0:1) goto <wx>; l_ftx = *[vumem]:4 (a + 0); <wx>
+	if (l_dy == 0:1) goto <wy>; l_fty = *[vumem]:4 (a + 4); <wy>
+	if (l_dz == 0:1) goto <wz>; l_ftz = *[vumem]:4 (a + 8); <wz>
+	if (l_dw == 0:1) goto <ww>; l_ftw = *[vumem]:4 (a + 12); <ww>
+}
+
+LNB: "sq"^LDEST l_fs, l_imm11^"("^lITr^")"
+	is l_op7=0x01 & LDEST & l_dx & l_dy & l_dz & l_dw & l_fs & lFSx & lFSy & lFSz & lFSw & l_imm11 & lITr
+{
+	local a:4 = (zext(lITr) + l_imm11) * 16;
+	if (l_dx == 0:1) goto <wx>; *[vumem]:4 (a + 0) = lFSx; <wx>
+	if (l_dy == 0:1) goto <wy>; *[vumem]:4 (a + 4) = lFSy; <wy>
+	if (l_dz == 0:1) goto <wz>; *[vumem]:4 (a + 8) = lFSz; <wz>
+	if (l_dw == 0:1) goto <ww>; *[vumem]:4 (a + 12) = lFSw; <ww>
+}
+
+LNB: "ilw"^LDEST lITw, l_imm11^"("^lISr^")"
+	is l_op7=0x04 & LDEST & LFOFF & lITw & l_imm11 & lISr
+{
+	local a:4 = (zext(lISr) + l_imm11) * 16 + LFOFF;
+	lITw = *[vumem]:2 a;
+}
+
+LNB: "isw"^LDEST lITr, l_imm11^"("^lISr^")"
+	is l_op7=0x05 & LDEST & l_dx & l_dy & l_dz & l_dw & lITr & l_imm11 & lISr
+{
+	local a:4 = (zext(lISr) + l_imm11) * 16;
+	local v:4 = zext(lITr);
+	if (l_dx == 0:1) goto <wx>; *[vumem]:4 (a + 0) = v; <wx>
+	if (l_dy == 0:1) goto <wy>; *[vumem]:4 (a + 4) = v; <wy>
+	if (l_dz == 0:1) goto <wz>; *[vumem]:4 (a + 8) = v; <wz>
+	if (l_dw == 0:1) goto <ww>; *[vumem]:4 (a + 12) = v; <ww>
+}
+
+LNB: "iaddiu" lITw, lISr, IMM15
+	is l_op7=0x08 & lITw & lISr & IMM15
+{
+	lITw = lISr + IMM15;
+}
+
+LNB: "isubiu" lITw, lISr, IMM15
+	is l_op7=0x09 & lITw & lISr & IMM15
+{
+	lITw = lISr - IMM15;
+}
+
+LNB: "fceq" "vi1", l_imm24
+	is l_op7=0x10 & l_imm24
+{
+	vi1 = zext((clip_flag & 0xFFFFFF) == l_imm24);
+}
+
+LNB: "fcset" l_imm24
+	is l_op7=0x11 & l_imm24
+{
+	clip_flag = l_imm24;
+}
+
+LNB: "fcand" "vi1", l_imm24
+	is l_op7=0x12 & l_imm24
+{
+	vi1 = zext((clip_flag & l_imm24) != 0);
+}
+
+LNB: "fcor" "vi1", l_imm24
+	is l_op7=0x13 & l_imm24
+{
+	vi1 = zext(((clip_flag | l_imm24) & 0xFFFFFF) == 0xFFFFFF);
+}
+
+LNB: "fcget" lITw
+	is l_op7=0x1C & lITw
+{
+	lITw = clip_flag:2 & 0xFFF;
+}
+
+LNB: "fseq" lITw, IMM12
+	is l_op7=0x14 & lITw & IMM12
+{
+	lITw = zext((status_flag & 0xFFF) == IMM12);
+}
+
+LNB: "fsset" IMM12
+	is l_op7=0x15 & IMM12
+{
+	status_flag = (status_flag & 0x3F) | (IMM12 & 0xFC0);
+}
+
+LNB: "fsand" lITw, IMM12
+	is l_op7=0x16 & lITw & IMM12
+{
+	local v:4 = status_flag & IMM12;
+	lITw = v:2;
+}
+
+LNB: "fsor" lITw, IMM12
+	is l_op7=0x17 & lITw & IMM12
+{
+	local v:4 = (status_flag & 0xFFF) | IMM12;
+	lITw = v:2;
+}
+
+LNB: "fmeq" lITw, lISr
+	is l_op7=0x18 & lITw & lISr
+{
+	lITw = zext(mac_flag:2 == lISr);
+}
+
+LNB: "fmand" lITw, lISr
+	is l_op7=0x1A & lITw & lISr
+{
+	lITw = mac_flag:2 & lISr;
+}
+
+LNB: "fmor" lITw, lISr
+	is l_op7=0x1B & lITw & lISr
+{
+	lITw = mac_flag:2 | lISr;
+}
+
+LNB: "iadd" lIDw, lISr, lITr
+	is l_op7=0x40 & l_op6=0x30 & lIDw & lISr & lITr
+{
+	lIDw = lISr + lITr;
+}
+
+LNB: "isub" lIDw, lISr, lITr
+	is l_op7=0x40 & l_op6=0x31 & lIDw & lISr & lITr
+{
+	lIDw = lISr - lITr;
+}
+
+LNB: "iand" lIDw, lISr, lITr
+	is l_op7=0x40 & l_op6=0x34 & lIDw & lISr & lITr
+{
+	lIDw = lISr & lITr;
+}
+
+LNB: "ior" lIDw, lISr, lITr
+	is l_op7=0x40 & l_op6=0x35 & lIDw & lISr & lITr
+{
+	lIDw = lISr | lITr;
+}
+
+LNB: "iaddi" lITw, lISr, l_imm5
+	is l_op7=0x40 & l_op6=0x32 & lITw & lISr & l_imm5
+{
+	lITw = lISr + l_imm5;
+}
+
+LNB: "nop"
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0C & l_bc=0 & l_dest=0 & l_ft=0 & l_fs=0
+{
+}
+
+LNB: "move"^LDEST l_ft, l_fs
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0C & l_bc=0 & LDEST & l_dx & l_dy & l_dz & l_dw & l_ft & l_ftx & l_fty & l_ftz & l_ftw & l_fs & lFSx & lFSy & lFSz & lFSw
+{
+	local rx:4 = lFSx;
+	local ry:4 = lFSy;
+	local rz:4 = lFSz;
+	local rw:4 = lFSw;
+	if (l_dx == 0:1) goto <wx>; l_ftx = rx; <wx>
+	if (l_dy == 0:1) goto <wy>; l_fty = ry; <wy>
+	if (l_dz == 0:1) goto <wz>; l_ftz = rz; <wz>
+	if (l_dw == 0:1) goto <ww>; l_ftw = rw; <ww>
+}
+
+LNB: "mr32"^LDEST l_ft, l_fs
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0C & l_bc=1 & LDEST & l_dx & l_dy & l_dz & l_dw & l_ft & l_ftx & l_fty & l_ftz & l_ftw & l_fs & lFSx & lFSy & lFSz & lFSw
+{
+	local rx:4 = lFSy;
+	local ry:4 = lFSz;
+	local rz:4 = lFSw;
+	local rw:4 = lFSx;
+	if (l_dx == 0:1) goto <wx>; l_ftx = rx; <wx>
+	if (l_dy == 0:1) goto <wy>; l_fty = ry; <wy>
+	if (l_dz == 0:1) goto <wz>; l_ftz = rz; <wz>
+	if (l_dw == 0:1) goto <ww>; l_ftw = rw; <ww>
+}
+
+LNB: "lqi"^LDEST l_ft, "("^lISr^"++)"
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0D & l_bc=0 & LDEST & l_dx & l_dy & l_dz & l_dw & l_ft & l_ftx & l_fty & l_ftz & l_ftw & lISr & lISw
+{
+	local a:4 = zext(lISr) * 16;
+	if (l_dx == 0:1) goto <wx>; l_ftx = *[vumem]:4 (a + 0); <wx>
+	if (l_dy == 0:1) goto <wy>; l_fty = *[vumem]:4 (a + 4); <wy>
+	if (l_dz == 0:1) goto <wz>; l_ftz = *[vumem]:4 (a + 8); <wz>
+	if (l_dw == 0:1) goto <ww>; l_ftw = *[vumem]:4 (a + 12); <ww>
+	lISw = lISr + 1;
+}
+
+LNB: "sqi"^LDEST l_fs, "("^lITr^"++)"
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0D & l_bc=1 & LDEST & l_dx & l_dy & l_dz & l_dw & l_fs & lFSx & lFSy & lFSz & lFSw & lITr & lITw
+{
+	local a:4 = zext(lITr) * 16;
+	if (l_dx == 0:1) goto <wx>; *[vumem]:4 (a + 0) = lFSx; <wx>
+	if (l_dy == 0:1) goto <wy>; *[vumem]:4 (a + 4) = lFSy; <wy>
+	if (l_dz == 0:1) goto <wz>; *[vumem]:4 (a + 8) = lFSz; <wz>
+	if (l_dw == 0:1) goto <ww>; *[vumem]:4 (a + 12) = lFSw; <ww>
+	lITw = lITr + 1;
+}
+
+LNB: "lqd"^LDEST l_ft, "(--"^lISr^")"
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0D & l_bc=2 & LDEST & l_dx & l_dy & l_dz & l_dw & l_ft & l_ftx & l_fty & l_ftz & l_ftw & lISr & lISw
+{
+	local n:2 = lISr - 1;
+	lISw = n;
+	local a:4 = zext(n) * 16;
+	if (l_dx == 0:1) goto <wx>; l_ftx = *[vumem]:4 (a + 0); <wx>
+	if (l_dy == 0:1) goto <wy>; l_fty = *[vumem]:4 (a + 4); <wy>
+	if (l_dz == 0:1) goto <wz>; l_ftz = *[vumem]:4 (a + 8); <wz>
+	if (l_dw == 0:1) goto <ww>; l_ftw = *[vumem]:4 (a + 12); <ww>
+}
+
+LNB: "sqd"^LDEST l_fs, "(--"^lITr^")"
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0D & l_bc=3 & LDEST & l_dx & l_dy & l_dz & l_dw & l_fs & lFSx & lFSy & lFSz & lFSw & lITr & lITw
+{
+	local n:2 = lITr - 1;
+	local a:4 = zext(n) * 16;
+	if (l_dx == 0:1) goto <wx>; *[vumem]:4 (a + 0) = lFSx; <wx>
+	if (l_dy == 0:1) goto <wy>; *[vumem]:4 (a + 4) = lFSy; <wy>
+	if (l_dz == 0:1) goto <wz>; *[vumem]:4 (a + 8) = lFSz; <wz>
+	if (l_dw == 0:1) goto <ww>; *[vumem]:4 (a + 12) = lFSw; <ww>
+	lITw = n;
+}
+
+LNB: "div" "Q", lFSF, lFTF
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0E & l_bc=0 & lFSF & lFTF
+{
+	Q = lFSF f/ lFTF;
+}
+
+LNB: "sqrt" "Q", lFTF
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0E & l_bc=1 & lFTF
+{
+	Q = sqrt(lFTF);
+}
+
+LNB: "rsqrt" "Q", lFSF, lFTF
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0E & l_bc=2 & lFSF & lFTF
+{
+	Q = lFSF f/ sqrt(lFTF);
+}
+
+LNB: "waitq"
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0E & l_bc=3
+{
+}
+
+LNB: "mtir" lITw, lFSF
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0F & l_bc=0 & lITw & lFSF
+{
+	lITw = lFSF:2;
+}
+
+LNB: "mfir"^LDEST l_ft, lISr
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0F & l_bc=1 & LDEST & l_dx & l_dy & l_dz & l_dw & l_ft & l_ftx & l_fty & l_ftz & l_ftw & lISr
+{
+	local v:4 = sext(lISr);
+	if (l_dx == 0:1) goto <wx>; l_ftx = v; <wx>
+	if (l_dy == 0:1) goto <wy>; l_fty = v; <wy>
+	if (l_dz == 0:1) goto <wz>; l_ftz = v; <wz>
+	if (l_dw == 0:1) goto <ww>; l_ftw = v; <ww>
+}
+
+LNB: "ilwr"^LDEST lITw, "("^lISr^")"
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0F & l_bc=2 & LDEST & LFOFF & lITw & lISr
+{
+	local a:4 = zext(lISr) * 16 + LFOFF;
+	lITw = *[vumem]:2 a;
+}
+
+LNB: "iswr"^LDEST lITr, "("^lISr^")"
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x0F & l_bc=3 & LDEST & l_dx & l_dy & l_dz & l_dw & lITr & lISr
+{
+	local a:4 = zext(lISr) * 16;
+	local v:4 = zext(lITr);
+	if (l_dx == 0:1) goto <wx>; *[vumem]:4 (a + 0) = v; <wx>
+	if (l_dy == 0:1) goto <wy>; *[vumem]:4 (a + 4) = v; <wy>
+	if (l_dz == 0:1) goto <wz>; *[vumem]:4 (a + 8) = v; <wz>
+	if (l_dw == 0:1) goto <ww>; *[vumem]:4 (a + 12) = v; <ww>
+}
+
+LNB: "rnext"^LDEST l_ft, "R"
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x10 & l_bc=0 & LDEST & l_dx & l_dy & l_dz & l_dw & l_ft & l_ftx & l_fty & l_ftz & l_ftw
+{
+	R = vu_rnext(R);
+	local v:4 = R;
+	if (l_dx == 0:1) goto <wx>; l_ftx = v; <wx>
+	if (l_dy == 0:1) goto <wy>; l_fty = v; <wy>
+	if (l_dz == 0:1) goto <wz>; l_ftz = v; <wz>
+	if (l_dw == 0:1) goto <ww>; l_ftw = v; <ww>
+}
+
+LNB: "rget"^LDEST l_ft, "R"
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x10 & l_bc=1 & LDEST & l_dx & l_dy & l_dz & l_dw & l_ft & l_ftx & l_fty & l_ftz & l_ftw
+{
+	local v:4 = R;
+	if (l_dx == 0:1) goto <wx>; l_ftx = v; <wx>
+	if (l_dy == 0:1) goto <wy>; l_fty = v; <wy>
+	if (l_dz == 0:1) goto <wz>; l_ftz = v; <wz>
+	if (l_dw == 0:1) goto <ww>; l_ftw = v; <ww>
+}
+
+LNB: "rinit" "R", lFSF
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x10 & l_bc=2 & lFSF
+{
+	R = 0x3F800000 | (lFSF & 0x7FFFFF);
+}
+
+LNB: "rxor" "R", lFSF
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x10 & l_bc=3 & lFSF
+{
+	R = 0x3F800000 | ((R ^ lFSF) & 0x7FFFFF);
+}
+
+LNB: "mfp"^LDEST l_ft, "P"
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x19 & l_bc=0 & LDEST & l_dx & l_dy & l_dz & l_dw & l_ft & l_ftx & l_fty & l_ftz & l_ftw
+{
+	local v:4 = P;
+	if (l_dx == 0:1) goto <wx>; l_ftx = v; <wx>
+	if (l_dy == 0:1) goto <wy>; l_fty = v; <wy>
+	if (l_dz == 0:1) goto <wz>; l_ftz = v; <wz>
+	if (l_dw == 0:1) goto <ww>; l_ftw = v; <ww>
+}
+
+LNB: "xtop" lITw
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1A & l_bc=0 & lITw
+{
+	lITw = vu_xtop();
+}
+
+LNB: "xitop" lITw
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1A & l_bc=1 & lITw
+{
+	lITw = vu_xitop();
+}
+
+LNB: "xgkick" lISr
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1B & l_bc=0 & lISr
+{
+	local a:4 = zext(lISr) * 16;
+	vu_xgkick(a);
+}
+
+LNB: "esadd" "P", l_fs
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1c & l_bc=0 & l_fs & lFSx & lFSy & lFSz & lFSw
+{
+	P = (lFSx f* lFSx) f+ (lFSy f* lFSy) f+ (lFSz f* lFSz);
+}
+
+LNB: "ersadd" "P", l_fs
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1c & l_bc=1 & l_fs & lFSx & lFSy & lFSz & lFSw
+{
+	P = int2float(1:4) f/ ((lFSx f* lFSx) f+ (lFSy f* lFSy) f+ (lFSz f* lFSz));
+}
+
+LNB: "eleng" "P", l_fs
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1c & l_bc=2 & l_fs & lFSx & lFSy & lFSz & lFSw
+{
+	P = sqrt((lFSx f* lFSx) f+ (lFSy f* lFSy) f+ (lFSz f* lFSz));
+}
+
+LNB: "erleng" "P", l_fs
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1c & l_bc=3 & l_fs & lFSx & lFSy & lFSz & lFSw
+{
+	P = int2float(1:4) f/ sqrt((lFSx f* lFSx) f+ (lFSy f* lFSy) f+ (lFSz f* lFSz));
+}
+
+LNB: "eatanxy" "P", l_fs
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1d & l_bc=0 & l_fs & lFSx & lFSy & lFSz & lFSw
+{
+	P = vu_eatanxy(lFSx, lFSy);
+}
+
+LNB: "eatanxz" "P", l_fs
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1d & l_bc=1 & l_fs & lFSx & lFSy & lFSz & lFSw
+{
+	P = vu_eatanxz(lFSx, lFSz);
+}
+
+LNB: "esum" "P", l_fs
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1d & l_bc=2 & l_fs & lFSx & lFSy & lFSz & lFSw
+{
+	P = lFSx f+ lFSy f+ lFSz f+ lFSw;
+}
+
+LNB: "esqrt" "P", lFSF
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1e & l_bc=0 & lFSF
+{
+	P = sqrt(lFSF);
+}
+
+LNB: "ersqrt" "P", lFSF
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1e & l_bc=1 & lFSF
+{
+	P = int2float(1:4) f/ sqrt(lFSF);
+}
+
+LNB: "ercpr" "P", lFSF
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1e & l_bc=2 & lFSF
+{
+	P = int2float(1:4) f/ lFSF;
+}
+
+LNB: "esin" "P", lFSF
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1f & l_bc=0 & lFSF
+{
+	P = vu_esin(lFSF);
+}
+
+LNB: "eatan" "P", lFSF
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1f & l_bc=1 & lFSF
+{
+	P = vu_eatan(lFSF);
+}
+
+LNB: "eexp" "P", lFSF
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1f & l_bc=2 & lFSF
+{
+	P = vu_eexp(lFSF);
+}
+
+LNB: "waitp"
+	is l_op7=0x40 & l_op4=0xF & l_sp=0x1E & l_bc=3
+{
+}
+
+
+# ---------------------------------------------------------------------------------------------
+# Branches: LBR prints them, LFLOW (built last) holds their p-code. The target is relative to
+# the following LIW (imm11 counts 8-byte LIWs); the next LIW is the delay slot. BAL/JALR store
+# the return address (the LIW after the delay slot) divided by 8. A branch is not allowed in an
+# LIW with the E bit (the LIW then does not decode).
+
+
+LBR: "b" BTGT	is l_op7=0x20 & BTGT { }
+LBR: "bal" lITw, BTGT	is l_op7=0x21 & lITw & BTGT { }
+LBR: "jr" lISr	is l_op7=0x24 & lISr { }
+LBR: "jalr" lITw, lISr	is l_op7=0x25 & lITw & lISr { }
+LBR: "ibeq" lITr, lISr, BTGT	is l_op7=0x28 & lITr & lISr & BTGT { }
+LBR: "ibne" lITr, lISr, BTGT	is l_op7=0x29 & lITr & lISr & BTGT { }
+LBR: "ibltz" lISr, BTGT	is l_op7=0x2c & lISr & BTGT { }
+LBR: "ibgtz" lISr, BTGT	is l_op7=0x2d & lISr & BTGT { }
+LBR: "iblez" lISr, BTGT	is l_op7=0x2e & lISr & BTGT { }
+LBR: "ibgez" lISr, BTGT	is l_op7=0x2f & lISr & BTGT { }
+
+LFLOW: is u_ebit=0 { }
+# E bit: the next LIW is executed, then the microprogram ends (back to the VIF / EE)
+LFLOW: is u_ebit=1 { delayslot(1); return [TPC]; }
+# JR vi15 is the usual return from a BAL subroutine
+LFLOW: is u_ebit=0 & u_ibit=0 & l_op7=0x24 & l_is=15 & lISr { local t:4 = zext(lISr) * 8; delayslot(1); return [t]; }
+LFLOW: is u_ebit=0 & u_ibit=0 & l_op7=0x20 & BTGT { delayslot(1); goto BTGT; }
+LFLOW: is u_ebit=0 & u_ibit=0 & l_op7=0x21 & lITw & BTGT & RETV { lITw = RETV; delayslot(1); call BTGT; }
+LFLOW: is u_ebit=0 & u_ibit=0 & l_op7=0x24 & lISr { local t:4 = zext(lISr) * 8; delayslot(1); goto [t]; }
+LFLOW: is u_ebit=0 & u_ibit=0 & l_op7=0x25 & lITw & lISr & RETV { local t:4 = zext(lISr) * 8; lITw = RETV; delayslot(1); call [t]; }
+LFLOW: is u_ebit=0 & u_ibit=0 & l_op7=0x28 & lITr & lISr & BTGT { local c:1 = lITr == lISr; delayslot(1); if (c) goto BTGT; }
+LFLOW: is u_ebit=0 & u_ibit=0 & l_op7=0x29 & lITr & lISr & BTGT { local c:1 = lITr != lISr; delayslot(1); if (c) goto BTGT; }
+LFLOW: is u_ebit=0 & u_ibit=0 & l_op7=0x2c & lISr & BTGT { local c:1 = lISr s< 0; delayslot(1); if (c) goto BTGT; }
+LFLOW: is u_ebit=0 & u_ibit=0 & l_op7=0x2d & lISr & BTGT { local c:1 = lISr s> 0; delayslot(1); if (c) goto BTGT; }
+LFLOW: is u_ebit=0 & u_ibit=0 & l_op7=0x2e & lISr & BTGT { local c:1 = lISr s<= 0; delayslot(1); if (c) goto BTGT; }
+LFLOW: is u_ebit=0 & u_ibit=0 & l_op7=0x2f & lISr & BTGT { local c:1 = lISr s>= 0; delayslot(1); if (c) goto BTGT; }
