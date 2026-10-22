@@ -75,6 +75,10 @@ public class AnalysisScheduler {
 		if (!enabled) {
 			return;
 		}
+		set = analysisMgr.restrict(set);
+		if (set != null && set.isEmpty()) {
+			return;
+		}
 
 		addSet.add(set);
 
@@ -82,7 +86,7 @@ public class AnalysisScheduler {
 	}
 
 	synchronized void added(Address addr) {
-		if (!enabled) {
+		if (!enabled || !analysisMgr.allows(addr)) {
 			return;
 		}
 
@@ -95,6 +99,10 @@ public class AnalysisScheduler {
 		if (!enabled) {
 			return;
 		}
+		set = analysisMgr.restrict(set);
+		if (set != null && set.isEmpty()) {
+			return;
+		}
 
 		removeSet.add(set);
 
@@ -102,7 +110,7 @@ public class AnalysisScheduler {
 	}
 
 	synchronized void removed(Address addr) {
-		if (!enabled) {
+		if (!enabled || !analysisMgr.allows(addr)) {
 			return;
 		}
 
@@ -113,6 +121,18 @@ public class AnalysisScheduler {
 
 	Analyzer getAnalyzer() {
 		return analyzer;
+	}
+
+	/**
+	 * Drop pending work outside the restriction (see
+	 * {@link AutoAnalysisManager#setAnalysisRestriction(AddressSetView)}).  Work queued before
+	 * the restriction was set, such as the events from creating many functions, would otherwise
+	 * still be analysed.
+	 * @param restriction the addresses analysis may touch
+	 */
+	synchronized void restrictPending(AddressSetView restriction) {
+		addSet = addSet.intersect(restriction);
+		removeSet = removeSet.intersect(restriction);
 	}
 
 	private AddressSet getAddedAddressSet() {

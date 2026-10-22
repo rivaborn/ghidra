@@ -110,6 +110,7 @@ public class AutoAnalysisManager {
 	//private Stack<Integer> taskPriorityStack = new Stack<Integer>();
 
 	private PriorityQueue<BackgroundCommand<Program>> queue = new PriorityQueue<>();
+	private volatile AddressSetView analysisRestriction;	// see setAnalysisRestriction
 	private Map<String, Long> timedTasks = new HashMap<>();
 	// used for testing and performance monitoring; accessed via reflection
 	private Map<String, Long> cumulativeTasks = new HashMap<>();
@@ -322,6 +323,47 @@ public class AutoAnalysisManager {
 	 *
 	 * @param restrictSet - null to do the entire program, or a set of address to be re-analyzed fully
 	 */
+	/**
+	 * Confine all further analysis to the given addresses, or lift the restriction (null).
+	 * <p>
+	 * Analysis normally spreads: references found in the analysed code lead to new code, data
+	 * and functions anywhere in the program, which are analysed in turn.  With a restriction,
+	 * every analyzer only receives the part of its work that lies inside the set, so analysing
+	 * a few functions of a large program stays within them.
+	 * @param restriction the addresses analysis may touch, or null for no restriction
+	 */
+	public void setAnalysisRestriction(AddressSetView restriction) {
+		analysisRestriction = restriction == null ? null : new AddressSet(restriction);
+		if (analysisRestriction != null) {
+			for (AnalysisTaskList list : taskArray) {
+				Iterator<AnalysisScheduler> it = list.iterator();
+				while (it.hasNext()) {
+					it.next().restrictPending(analysisRestriction);
+				}
+			}
+		}
+	}
+
+	/**
+	 * @return the current analysis restriction, or null if there is none
+	 * @see #setAnalysisRestriction(AddressSetView)
+	 */
+	public AddressSetView getAnalysisRestriction() {
+		return analysisRestriction;
+	}
+
+	/** The part of the set analysis may touch */
+	AddressSetView restrict(AddressSetView set) {
+		AddressSetView r = analysisRestriction;
+		return (r == null || set == null) ? set : set.intersect(r);
+	}
+
+	/** True if analysis may touch the address */
+	boolean allows(Address addr) {
+		AddressSetView r = analysisRestriction;
+		return r == null || addr == null || r.contains(addr);
+	}
+
 	public void reAnalyzeAll(AddressSetView restrictSet) {
 
 		if (restrictSet == null || restrictSet.isEmpty()) {
