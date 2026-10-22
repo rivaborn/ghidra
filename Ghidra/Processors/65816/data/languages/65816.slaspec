@@ -28,6 +28,11 @@
 #   xflag = 1 : index registers are 8 bits (high bytes of X and Y are 0)
 #   xflag = 0 : index registers are 16 bits
 #   emode = 1 : emulation mode (M and X forced to 1)
+#   dflag = 1 : decimal mode (D flag): ADC/SBC use BCD arithmetic
+#
+# The D flag is a flowing context bit too: SED/CLD, REP/SEP #imm with bit 3,
+# and PLP (after a PHP) set it, and ADC/SBC decode to binary or decimal
+# p-code from it. It does not change instruction lengths.
 #
 # Address formation:
 #   direct page      : bank 0, D + dp           (16-bit wrap)
@@ -36,8 +41,16 @@
 #   long             : 24-bit operand
 #   stack            : bank 0, S                (see SP below)
 #
-# Not modelled: decimal-mode (D flag) arithmetic, the emulation-mode
-# direct-page/stack page wrap quirks, the emulation-mode B (break) flag.
+# Decimal mode (dflag=1): ADC and SBC work digit by digit on 2 (8-bit) or
+# 4 (16-bit) BCD digits, with the decimal carry. N and Z come from the
+# decimal result, as on the 65C02/65C816. V: ADC sets it from the signed
+# overflow of the intermediate sum after every digit but the top one has
+# been adjusted (the 65C02 rule, Bruce Clark's sequence 2); SBC sets it as
+# in binary mode. Operands that are not valid BCD (a digit above 9) follow
+# the same digit-wise rule, which may differ from the silicon.
+#
+# Not modelled: the emulation-mode direct-page/stack page wrap quirks, the
+# emulation-mode B (break) flag.
 
 define endian=little;
 define alignment=1;
@@ -80,6 +93,8 @@ define context contextreg
     savedM = (3,3)          # mflag saved by the last PHP
     savedX = (4,4)          # xflag saved by the last PHP
     cknown = (5,6) noflow   # carry known for the next instruction: 1 clear, 2 set
+    dflag  = (7,7)          # 1: decimal mode (D flag set)
+    savedD = (8,8)          # dflag saved by the last PHP
 ;
 
 ################################################################
@@ -203,6 +218,85 @@ macro sbc(r, op) {
     nz(r);
 }
 
+# Decimal (BCD) ADC/SBC. Each digit: d = a + b + carry; if d > 9 then
+# d = d + 6 and carry out. SBC: d = a - b - borrow; if d < 0 then d = d - 6
+# and borrow out, so its carry and V equal the binary ones.
+macro adcBcd8(r, op) {
+    local a:1 = r;
+    local b:1 = op;
+    local d0:1 = (a & 0xF) + (b & 0xF) + CF;
+    local k0:1 = zext(d0 > 9);
+    d0 = (d0 + k0 * 6) & 0xF;
+    local d1:1 = (a >> 4) + (b >> 4) + k0;
+    local t:1 = (d1 << 4) | d0;
+    VF = ((a ^ t) & (b ^ t)) s< 0;
+    local k1:1 = zext(d1 > 9);
+    d1 = d1 + k1 * 6;
+    CF = k1;
+    r = (d1 << 4) | d0;
+    nz(r);
+}
+
+macro adcBcd16(r, op) {
+    local a:2 = r;
+    local b:2 = op;
+    local d0:2 = (a & 0xF) + (b & 0xF) + zext(CF);
+    local k0:2 = zext(d0 > 9);
+    d0 = (d0 + k0 * 6) & 0xF;
+    local d1:2 = ((a >> 4) & 0xF) + ((b >> 4) & 0xF) + k0;
+    local k1:2 = zext(d1 > 9);
+    d1 = (d1 + k1 * 6) & 0xF;
+    local d2:2 = ((a >> 8) & 0xF) + ((b >> 8) & 0xF) + k1;
+    local k2:2 = zext(d2 > 9);
+    d2 = (d2 + k2 * 6) & 0xF;
+    local d3:2 = (a >> 12) + (b >> 12) + k2;
+    local t:2 = (d3 << 12) | (d2 << 8) | (d1 << 4) | d0;
+    VF = ((a ^ t) & (b ^ t)) s< 0;
+    local k3:2 = zext(d3 > 9);
+    d3 = d3 + k3 * 6;
+    CF = k3:1;
+    r = (d3 << 12) | (d2 << 8) | (d1 << 4) | d0;
+    nz(r);
+}
+
+macro sbcBcd8(r, op) {
+    local a:1 = r;
+    local b:1 = op;
+    local bin:1 = a + ~b + CF;
+    VF = ((a ^ b) & (a ^ bin)) s< 0;
+    local d0:1 = (a & 0xF) - (b & 0xF) - (1 - CF);
+    local k0:1 = zext(d0 s< 0);
+    d0 = (d0 - k0 * 6) & 0xF;
+    local d1:1 = (a >> 4) - (b >> 4) - k0;
+    local k1:1 = zext(d1 s< 0);
+    d1 = d1 - k1 * 6;
+    CF = k1 == 0;
+    r = (d1 << 4) | d0;
+    nz(r);
+}
+
+macro sbcBcd16(r, op) {
+    local a:2 = r;
+    local b:2 = op;
+    local bin:2 = a + ~b + zext(CF);
+    VF = ((a ^ b) & (a ^ bin)) s< 0;
+    local d0:2 = (a & 0xF) - (b & 0xF) - zext(1 - CF);
+    local k0:2 = zext(d0 s< 0);
+    d0 = (d0 - k0 * 6) & 0xF;
+    local d1:2 = ((a >> 4) & 0xF) - ((b >> 4) & 0xF) - k0;
+    local k1:2 = zext(d1 s< 0);
+    d1 = (d1 - k1 * 6) & 0xF;
+    local d2:2 = ((a >> 8) & 0xF) - ((b >> 8) & 0xF) - k1;
+    local k2:2 = zext(d2 s< 0);
+    d2 = (d2 - k2 * 6) & 0xF;
+    local d3:2 = (a >> 12) - (b >> 12) - k2;
+    local k3:2 = zext(d3 s< 0);
+    d3 = d3 - k3 * 6;
+    CF = k3 == 0;
+    r = (d3 << 12) | (d2 << 8) | (d1 << 4) | d0;
+    nz(r);
+}
+
 macro cmp(r, op) {
     local res = r - op;
     CF = r >= op;
@@ -323,16 +417,20 @@ JLONG: imm24  is imm24                                              { export *:1
 :AND OPA16  is (mflag=0 & aaa=1 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { C = C & OPA16; nz(C); }
 :EOR OPA8   is (mflag=1 & aaa=2 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { A = A ^ OPA8; nz(A); }
 :EOR OPA16  is (mflag=0 & aaa=2 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { C = C ^ OPA16; nz(C); }
-:ADC OPA8   is (mflag=1 & aaa=3 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { local o = OPA8; adc(A, o); }
-:ADC OPA16  is (mflag=0 & aaa=3 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { local o = OPA16; adc(C, o); }
+:ADC OPA8   is (mflag=1 & dflag=0 & aaa=3 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { local o = OPA8; adc(A, o); }
+:ADC OPA16  is (mflag=0 & dflag=0 & aaa=3 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { local o = OPA16; adc(C, o); }
+:ADC OPA8   is (mflag=1 & dflag=1 & aaa=3 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { local o = OPA8; adcBcd8(A, o); }
+:ADC OPA16  is (mflag=0 & dflag=1 & aaa=3 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { local o = OPA16; adcBcd16(C, o); }
 :STA MEMA8  is (mflag=1 & aaa=4 & op!=0x89 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & MEMA8   { MEMA8 = A; }
 :STA MEMA16 is (mflag=0 & aaa=4 & op!=0x89 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & MEMA16  { MEMA16 = C; }
 :LDA OPA8   is (mflag=1 & aaa=5 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { A = OPA8; nz(A); }
 :LDA OPA16  is (mflag=0 & aaa=5 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { C = OPA16; nz(C); }
 :CMP OPA8   is (mflag=1 & aaa=6 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { local o = OPA8; cmp(A, o); }
 :CMP OPA16  is (mflag=0 & aaa=6 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { local o = OPA16; cmp(C, o); }
-:SBC OPA8   is (mflag=1 & aaa=7 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { local o = OPA8; sbc(A, o); }
-:SBC OPA16  is (mflag=0 & aaa=7 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { local o = OPA16; sbc(C, o); }
+:SBC OPA8   is (mflag=1 & dflag=0 & aaa=7 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { local o = OPA8; sbc(A, o); }
+:SBC OPA16  is (mflag=0 & dflag=0 & aaa=7 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { local o = OPA16; sbc(C, o); }
+:SBC OPA8   is (mflag=1 & dflag=1 & aaa=7 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA8    { local o = OPA8; sbcBcd8(A, o); }
+:SBC OPA16  is (mflag=0 & dflag=1 & aaa=7 & (cc=1 | (cc=3 & bbb!=2 & bbb!=6) | (cc=2 & bbb=4))) ... & OPA16   { local o = OPA16; sbcBcd16(C, o); }
 
 ################################################################
 # BIT, TSB, TRB, STZ
@@ -474,15 +572,17 @@ JLONG: imm24  is imm24                                              { export *:1
 :PLD  is op=0x2B  { pop16(D); nz(D); }
 :PHK  is op=0x4B  { local k:3 = inst_start; local kb:1 = k(2); push8(kb); }
 
-# PHP remembers the current M/X context so a matching PLP restores it
-:PHP  is op=0x08  [ savedM = mflag; savedX = xflag; globalset(inst_next, savedM); globalset(inst_next, savedX); ]
+# PHP remembers the current M/X/D context so a matching PLP restores it
+:PHP  is op=0x08  [ savedM = mflag; savedX = xflag; savedD = dflag;
+                    globalset(inst_next, savedM); globalset(inst_next, savedX); globalset(inst_next, savedD); ]
 {
     local p:1 = 0;
     packP(p);
     push8(p);
 }
 
-:PLP  is op=0x28  [ mflag = savedM; xflag = savedX; globalset(inst_next, mflag); globalset(inst_next, xflag); ]
+:PLP  is op=0x28  [ mflag = savedM; xflag = savedX; dflag = savedD;
+                    globalset(inst_next, mflag); globalset(inst_next, xflag); globalset(inst_next, dflag); ]
 {
     local p:1 = 0;
     pop8(p);
@@ -507,13 +607,13 @@ JLONG: imm24  is imm24                                              { export *:1
 :CLI  is op=0x58  { IF = 0; }
 :SEI  is op=0x78  { IF = 1; }
 :CLV  is op=0xB8  { VF = 0; }
-:CLD  is op=0xD8  { DF = 0; }
-:SED  is op=0xF8  { DF = 1; }
+:CLD  is op=0xD8  [ dflag = 0; globalset(inst_next, dflag); ]  { DF = 0; }
+:SED  is op=0xF8  [ dflag = 1; globalset(inst_next, dflag); ]  { DF = 1; }
 
 # REP: reset the P bits set in the operand (M and X stay 1 in emulation mode)
 :REP "#"imm8  is emode=0 & op=0xC2; imm8
-    [ mflag = mflag & ~((imm8 >> 5) & 1); xflag = xflag & ~((imm8 >> 4) & 1);
-      globalset(inst_next, mflag); globalset(inst_next, xflag); ]
+    [ mflag = mflag & ~((imm8 >> 5) & 1); xflag = xflag & ~((imm8 >> 4) & 1); dflag = dflag & ~((imm8 >> 3) & 1);
+      globalset(inst_next, mflag); globalset(inst_next, xflag); globalset(inst_next, dflag); ]
 {
     local p:1 = 0;
     packP(p);
@@ -521,6 +621,7 @@ JLONG: imm24  is imm24                                              { export *:1
     unpackP(p);
 }
 :REP "#"imm8  is emode=1 & op=0xC2; imm8
+    [ dflag = dflag & ~((imm8 >> 3) & 1); globalset(inst_next, dflag); ]
 {
     local p:1 = 0;
     packP(p);
@@ -530,8 +631,8 @@ JLONG: imm24  is imm24                                              { export *:1
 
 # SEP: set the P bits set in the operand
 :SEP "#"imm8  is op=0xE2; imm8
-    [ mflag = mflag | ((imm8 >> 5) & 1); xflag = xflag | ((imm8 >> 4) & 1);
-      globalset(inst_next, mflag); globalset(inst_next, xflag); ]
+    [ mflag = mflag | ((imm8 >> 5) & 1); xflag = xflag | ((imm8 >> 4) & 1); dflag = dflag | ((imm8 >> 3) & 1);
+      globalset(inst_next, mflag); globalset(inst_next, xflag); globalset(inst_next, dflag); ]
 {
     local p:1 = 0;
     packP(p);

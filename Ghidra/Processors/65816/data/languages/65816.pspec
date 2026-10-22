@@ -5,7 +5,8 @@
 
   <!-- Default disassembly context: native mode with 8-bit accumulator and
        8-bit index registers (M=1, X=1, E=0). Change it per address range
-       with "Set Register Values..." on mflag / xflag / emode. -->
+       with "Set Register Values..." on mflag / xflag / emode (dflag: decimal
+       mode for ADC/SBC). -->
   <context_data>
     <context_set space="ram">
       <set name="mflag" val="1"/>
@@ -13,6 +14,8 @@
       <set name="emode" val="0"/>
       <set name="savedM" val="1"/>
       <set name="savedX" val="1"/>
+      <set name="dflag" val="0"/>
+      <set name="savedD" val="0"/>
     </context_set>
     <tracked_set space="ram">
       <set name="MF" val="1"/>

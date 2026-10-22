@@ -29,6 +29,7 @@ M and X flags (and on E, emulation mode). They are context registers:
 | `mflag`  | 1: 8-bit accumulator and memory, 0: 16-bit               | 1       |
 | `xflag`  | 1: 8-bit index registers, 0: 16-bit                      | 1       |
 | `emode`  | 1: emulation mode (M and X forced to 1)                  | 0       |
+| `dflag`  | 1: decimal mode (D flag): `ADC`/`SBC` use BCD            | 0       |
 
 The default is native mode with M=1, X=1, the state after the usual SNES
 reset sequence `CLC; XCE`. The disassembler then follows the code:
@@ -38,6 +39,8 @@ reset sequence `CLC; XCE`. The disassembler then follows the code:
 - `CLC; XCE` selects native mode, `SEC; XCE` emulation mode (with M=X=1);
   an `XCE` not directly after `CLC`/`SEC` leaves the context unchanged;
 - `PLP` restores the M/X context saved by the last `PHP` on the same flow.
+- `SED` / `CLD`, and `REP` / `SEP` with bit 3, set `dflag`; `PLP` restores
+  it from the last `PHP` too.
 
 To change the state at a function entry or any other address, select the
 range in the Listing and use **Set Register Values...** on `mflag`, `xflag`
@@ -78,16 +81,41 @@ It fits `JSR`/`RTS` and `JSL`/`RTL` functions alike: its stack purge matches
 returns. Ghidra's emulator branches at the call and never executes that
 op, so emulation stays exact.
 
+## Decimal mode
+
+With `dflag` = 1, `ADC` and `SBC` work on 2 (8-bit) or 4 (16-bit) BCD digits:
+each digit is added (subtracted) with the carry (borrow) of the digit below and
+adjusted by 6 when it passes 9 (goes below 0). The carry out is the decimal
+carry; N and Z come from the decimal result, as on the 65C02/65C816.
+
+| Flag | ADC (decimal)                                                       | SBC (decimal)        |
+| ---- | ------------------------------------------------------------------- | -------------------- |
+| C    | decimal carry out of the top digit                                  | same as binary       |
+| V    | signed overflow of the sum before the top digit is adjusted         | same as binary       |
+| N, Z | from the result                                                     | from the result      |
+
+V for ADC follows the 65C02 rule (Bruce Clark's decimal-mode tutorial,
+sequence 2); for SBC the binary V. Operands that are not valid BCD (a digit
+above 9) follow the same digit-by-digit rule, which may differ from the
+silicon. The decompiler shows decimal arithmetic as the digit-by-digit
+expressions.
+
 ## Not modelled
 
-- Decimal mode (`SED`): `ADC`/`SBC` are always binary.
 - Emulation-mode wrap quirks (direct page and stack confined to one page).
 - `BRK`/`COP` are pseudo-ops (`softwareInterrupt`, `coprocessorInterrupt`)
   that fall through; `WAI` and `STP` are pseudo-ops too.
 - M/X across calls: the disassembler carries the caller's M/X context into
   a `JSR`/`JSL` target the first time it reaches it (a `REP #$30; JSR sub`
   decodes `sub` with 16-bit operands). Whichever flow reaches a routine first
-  wins; a routine called in different states, or disassembled first from
-  elsewhere (entry points, analysis), keeps the state it was decoded with.
-  After a call returns, the caller continues with its own context, although
-  the callee may have changed M/X. Set the state by hand where it is wrong.
+  wins. The **65816 M/X State Propagation** analyzer (ConsoleFormats module,
+  `Snes65816StateAnalyzer`, on by default) corrects this after disassembly:
+  when all the `JSR`/`JSL`/`JMP`/`JML` call sites of a routine agree on M/X/E
+  and the routine was decoded with another state, it sets the state at the
+  entry and disassembles the routine again; when they disagree it adds a
+  warning bookmark (`called with M=?,X=? from ...`). Bits that a routine sets
+  itself with a leading `REP`/`SEP` are ignored. Native-mode interrupt
+  vectors give no state (a note bookmark marks routines that depend on it);
+  RESET and the emulation vectors give M=1, X=1. After a call returns, the
+  caller continues with its own context, although the callee may have
+  changed M/X.
