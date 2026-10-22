@@ -182,6 +182,13 @@ Elf e_flags are used for the secondary attribute, the following are pulled from 
         <constraint primary="8,10" processor="MIPS" size="64" variant="R6"
                 secondary= "0b 1010 00.0 .... .... 0000 0... 0000 ...."/>
 
+  <!-- Toshiba/Sony R5900 (PlayStation 2 Emotion Engine) -->
+	<!-- EF_MIPS_MACH = EF_MIPS_MACH_5900 (0x00920000), little endian; all other bits don't care.
+	     PS2 executables normally carry 0x20924001 (MIPS III, EABI64, noreorder), which no
+	     other constraint above matches. -->
+        <constraint primary="8,10" processor="MIPS" endian="little" size="32" variant="R5900"
+                secondary= "0b .... .... 1001 0010 .... .... .... ...."/>
+
     </constraint>
 
 </opinions>

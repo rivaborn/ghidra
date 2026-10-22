@@ -150,7 +150,11 @@
 @else                # full 64 bit ptrs
 
 @define REGSIZE "8"     # General purpose register size (8 or 4)
+@ifdef R5900
+@define FREGSIZE "4"    # R5900 (Emotion Engine) FPU: 32 single-precision 32-bit registers only
+@else
 @define FREGSIZE "8"    # Floating point register size (8 or 4)
+@endif
 @define ADDRSIZE "8"    # Memory address size (8 or 4, virtual and physical)
 @define DREGSIZE "16"     # 2x REGSIZE used for accumulators
 @define SIZETO4 "4"    # In 64-bit mode, use when need to do 32-bit operation
@@ -180,17 +184,45 @@ define space ram type=ram_space size=$(ADDRSIZE) default;
 define space register type=register_space size=4;
 
 # General purpose registers
-define register offset=0 size=$(REGSIZE) [ 
-    zero at v0 v1 
-    a0 a1 a2 a3 
-    t0 t1 t2 t3 
-    t4 t5 t6 t7 
-    s0 s1 s2 s3 
-    s4 s5 s6 s7 
-    t8 t9 k0 k1 
+@ifdef R5900
+# R5900 (Emotion Engine): the GPRs are 128 bits wide. The usual 64-bit names (zero, at, ...)
+# are the low doublewords, so ordinary integer code sees the same registers as MIPS64.
+# <name>_ud is the upper doubleword, <name>_qw the whole 128-bit register (LQ/SQ/MMI).
+# Little endian only: the low doubleword is at the lower offset.
+define register offset=0 size=16 [
+    zero_qw at_qw v0_qw v1_qw
+    a0_qw a1_qw a2_qw a3_qw
+    t0_qw t1_qw t2_qw t3_qw
+    t4_qw t5_qw t6_qw t7_qw
+    s0_qw s1_qw s2_qw s3_qw
+    s4_qw s5_qw s6_qw s7_qw
+    t8_qw t9_qw k0_qw k1_qw
+    gp_qw sp_qw s8_qw ra_qw
+];
+define register offset=0 size=8 [
+    zero zero_ud at at_ud v0 v0_ud v1 v1_ud
+    a0 a0_ud a1 a1_ud a2 a2_ud a3 a3_ud
+    t0 t0_ud t1 t1_ud t2 t2_ud t3 t3_ud
+    t4 t4_ud t5 t5_ud t6 t6_ud t7 t7_ud
+    s0 s0_ud s1 s1_ud s2 s2_ud s3 s3_ud
+    s4 s4_ud s5 s5_ud s6 s6_ud s7 s7_ud
+    t8 t8_ud t9 t9_ud k0 k0_ud k1 k1_ud
+    gp gp_ud sp sp_ud s8 s8_ud ra ra_ud
+    pc
+];
+@else
+define register offset=0 size=$(REGSIZE) [
+    zero at v0 v1
+    a0 a1 a2 a3
+    t0 t1 t2 t3
+    t4 t5 t6 t7
+    s0 s1 s2 s3
+    s4 s5 s6 s7
+    t8 t9 k0 k1
     gp sp s8 ra
     pc
 ];
+@endif # R5900
 
 @ifdef MIPS64
 # We need the 32-bit pieces of the main registers for the 32-bit instructions
@@ -205,6 +237,19 @@ define register offset=0 size=4 [
     t8_hi t8_lo t9_hi t9_lo k0_hi k0_lo k1_hi k1_lo
     gp_hi gp_lo sp_hi sp_lo s8_hi s8_lo ra_hi ra_lo
     pc_hi pc_lo
+];
+@elif defined(R5900)
+# R5900: 32-bit pieces of the low doubleword of each 128-bit GPR
+define register offset=0 size=4 [
+    zero_lo zero_hi _ _ at_lo at_hi _ _ v0_lo v0_hi _ _ v1_lo v1_hi _ _
+    a0_lo a0_hi _ _ a1_lo a1_hi _ _ a2_lo a2_hi _ _ a3_lo a3_hi _ _
+    t0_lo t0_hi _ _ t1_lo t1_hi _ _ t2_lo t2_hi _ _ t3_lo t3_hi _ _
+    t4_lo t4_hi _ _ t5_lo t5_hi _ _ t6_lo t6_hi _ _ t7_lo t7_hi _ _
+    s0_lo s0_hi _ _ s1_lo s1_hi _ _ s2_lo s2_hi _ _ s3_lo s3_hi _ _
+    s4_lo s4_hi _ _ s5_lo s5_hi _ _ s6_lo s6_hi _ _ s7_lo s7_hi _ _
+    t8_lo t8_hi _ _ t9_lo t9_hi _ _ k0_lo k0_hi _ _ k1_lo k1_hi _ _
+    gp_lo gp_hi _ _ sp_lo sp_hi _ _ s8_lo s8_hi _ _ ra_lo ra_hi _ _
+    pc_lo pc_hi
 ];
 @else
 define register offset=0 size=4 [
@@ -359,6 +404,17 @@ define register offset=0x2700 size=$(REGSIZE) [
 ];
 
 # Some other internal registers
+@ifdef R5900
+# R5900: HI and LO are 128 bits wide. lo/hi are the low doublewords (pipeline 0),
+# lo1/hi1 the upper doublewords (pipeline 1: MULT1, DIV1, MFLO1, ...).
+# lo_qw/hi_qw are the full 128-bit registers (PMFLO, PMTHI, PMULTW, ...).
+# There is no DSP ASE on the R5900, so there are no ac0..ac3 accumulators.
+define register offset=0x3000 size=$(REGSIZE) [
+    lo lo1 hi hi1 lo2 hi2 lo3 hi3
+    tsp
+];
+define register offset=0x3000 size=16 [ lo_qw hi_qw ];
+@else
 define register offset=0x3000 size=$(REGSIZE) [
 @if ENDIAN == "big"
     hi lo hi1 lo1 hi2 lo2 hi3 lo3
@@ -370,6 +426,7 @@ define register offset=0x3000 size=$(REGSIZE) [
 
 # MIPS dsp lo/hi combined registers
 define register offset=0x3000 size=$(DREGSIZE) [ ac0 ac1 ac2 ac3 ];
+@endif # R5900
 
 define register offset=0x3100 size=$(REGSIZE) [ DSPControl ];
 
@@ -652,6 +709,34 @@ define token instr(32)
     simmed      = (0,15) signed
     simmseq     = (6,15) signed
     simmed11    = (0,10) signed
+@ifdef R5900
+    # R5900 (Emotion Engine) fields, used by r5900.sinc
+    ee_rsq      = (21,25)
+    ee_rtq      = (16,20)
+    ee_rdq      = (11,15)
+    ee_mmiop    = (6,10)
+    ee_dest     = (21,24)
+    ee_ftf      = (23,24)
+    ee_fsf      = (21,22)
+    ee_vft      = (16,20)
+    ee_vit      = (16,20)
+    ee_vfs      = (11,15)
+    ee_vis      = (11,15)
+    ee_ctl      = (11,15)
+    ee_c0r      = (11,15)
+    ee_vfd      = (6,10)
+    ee_vid      = (6,10)
+    ee_sp2      = (6,10)
+    ee_imm5     = (6,10) signed
+    ee_imm15    = (6,20)
+    ee_low11    = (0,10)
+    ee_zero110  = (1,10)
+    ee_perf     = (1,5)
+    ee_vfunc    = (0,5)
+    ee_vfunc2   = (2,5)
+    ee_bc       = (0,1)
+    ee_ibit     = (0,0)
+@endif # R5900
 ;
 
 attach variables [ rs rt rd base index baser6 ] [ 
@@ -807,7 +892,9 @@ attach variables [ rd0_7 ] [
 
 attach variables [ aclo acflo ] [ lo lo1 lo2 lo3 ];
 attach variables [ achi acfhi ] [ hi hi1 hi2 hi3 ];
+@ifndef R5900
 attach variables [ ac acf ] [ ac0 ac1 ac2 ac3 ];
+@endif
 
 attach names hint [ 
     "load" "store" "hint2" "hint3" "load_streamed" "store_streamed" "load_retained" "store_retained"

@@ -319,17 +319,21 @@ define pcodeop mipsFloatPS;
 }
 
 # 0100 01ff fff0 0000 ssss sddd dd01 0110
+@ifndef R5900   # EE RSQRT.S fd, fs, ft
 :rsqrt.S fd, fs             is $(AMODE) & prime=17 & ft=0 & fct=22 & fmt2 & fd & fs & format=0x10 {
     fd[0,32] = 1:4 f/ sqrt(fs:4);
 }
+@endif
 :rsqrt.D fd, fs             is $(AMODE) & prime=17 & ft=0 & fct=22 & fmt2 & fd & fs & format=0x11 & fdD & fsD {
     fdD = 1:8 f/ sqrt(fsD);
 }
 
 # 0100 01ff fff0 0000 ssss sddd dd00 0100
+@ifndef R5900   # EE SQRT.S fd, ft
 :sqrt.S fd, fs              is $(AMODE) & prime=17 & ft=0 & fct=4 & fmt2 & fd & fs & format=0x10 {
     fd[0,32] = sqrt(fs:4);
 }
+@endif
 :sqrt.D fd, fs              is $(AMODE) & prime=17 & ft=0 & fct=4 & fmt2 & fd & fs & format=0x11 & fsD & fdD {
     fdD = sqrt(fsD);
 }
@@ -575,10 +579,12 @@ macro trapIfSNaN(x1, x2) { }
     fcsr[23,1] = mipsFloatPS(fsD, ftD);
 }
 
+@ifndef R5900   # EE C.LT.S
 :c.olt.S fs, ft              is $(AMODE) & REL6=0 & prime=17 & fct=52 & fmt1 & format=0x10 & fs & ft {
     trapIfSNaN(fs:4, ft:4);
     fcsr[23,1] = (fs:4 f< ft:4);
 }
+@endif
 :c.olt.D fs, ft              is $(AMODE) & REL6=0 & prime=17 & fct=52 & fmt1 & fs & ft & format=0x11 & fsD & ftD {
     trapIfSNaN(fsD, ftD);
     fcsr[23,1] = (fsD f< ftD);
@@ -599,10 +605,12 @@ macro trapIfSNaN(x1, x2) { }
     fcsr[23,1] = mipsFloatPS(fsD, ftD);
 }
 
+@ifndef R5900   # EE C.LE.S
 :c.ole.S fs, ft              is $(AMODE) & REL6=0 & prime=17 & fct=54 & fmt1 & format=0x10 & fs & ft {
     trapIfSNaN(fs:4, ft:4);
     fcsr[23,1] = (fs:4 f<= ft:4);
 }
+@endif
 :c.ole.D fs, ft              is $(AMODE) & REL6=0 & prime=17 & fct=54 & fmt1 & fs & ft & format=0x11 & fsD & ftD {
     trapIfSNaN(fsD, ftD);
     fcsr[23,1] = (fsD f<= ftD);
