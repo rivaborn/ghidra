@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ###
+     IP: GHIDRA
+
+     Licensed under the Apache License, Version 2.0 (the "License");
+     you may not use this file except in compliance with the License.
+     You may obtain a copy of the License at
+
+          http://www.apache.org/licenses/LICENSE-2.0
+
+     Unless required by applicable law or agreed to in writing, software
+     distributed under the License is distributed on an "AS IS" BASIS,
+     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+     See the License for the specific language governing permissions and
+     limitations under the License.
+     ### -->
+<!-- Compiler spec for PlayStation 2 EE code (GCC "ee" target: MIPS EABI with 64-bit GPRs,
+     32-bit pointers, 64-bit long, single-precision hardware float).
+     Integer arguments: a0-a3, t0-t3 ($4-$11), then the stack (no home area).
+     Float arguments: f12-f19. Results: v0 (v1), f0.
+     Callee-saved: s0-s8, gp, sp, f20-f31. The saved GPRs are listed as their 128-bit
+     registers because EE code commonly saves and restores them with SQ/LQ. -->
+<compiler_spec>
+  <data_organization>
+     <absolute_max_alignment value="0" />
+     <machine_alignment value="2" />
+     <default_alignment value="1" />
+     <default_pointer_alignment value="4" />
+     <pointer_size value="4" />
+     <wchar_size value="2" />
+     <short_size value="2" />
+     <integer_size value="4" />
+     <long_size value="8" />
+     <long_long_size value="8" />
+     <float_size value="4" />
+     <double_size value="8" />
+     <long_double_size value="8" />
+     <size_alignment_map>
+          <entry size="1" alignment="1" />
+          <entry size="2" alignment="2" />
+          <entry size="4" alignment="4" />
+          <entry size="8" alignment="8" />
+          <entry size="16" alignment="16" />
+     </size_alignment_map>
+  </data_organization>
+  <stackpointer register="sp" space="ram"/>
+  <funcptr align="2"/>
+  <global>
+    <range space="ram"/>
+    <range space="register" first="0x2000" last="0x2fff"/>
+  </global>
+  <returnaddress>
+    <register name="ra"/>
+  </returnaddress>
+  <aggressivetrim signext="true"/>  <!-- Aggressively try to eliminate sign extensions -->
+  <default_proto>
+    <prototype name="__stdcall" extrapop="0" stackshift="0">
+      <input>
+        <pentry minsize="1" maxsize="4" metatype="float">
+          <register name="f12"/>
+        </pentry>
+        <pentry minsize="1" maxsize="4" metatype="float">
+          <register name="f13"/>
+        </pentry>
+        <pentry minsize="1" maxsize="4" metatype="float">
+          <register name="f14"/>
+        </pentry>
+        <pentry minsize="1" maxsize="4" metatype="float">
+          <register name="f15"/>
+        </pentry>
+        <pentry minsize="1" maxsize="4" metatype="float">
+          <register name="f16"/>
+        </pentry>
+        <pentry minsize="1" maxsize="4" metatype="float">
+          <register name="f17"/>
+        </pentry>
+        <pentry minsize="1" maxsize="4" metatype="float">
+          <register name="f18"/>
+        </pentry>
+        <pentry minsize="1" maxsize="4" metatype="float">
+          <register name="f19"/>
+        </pentry>
+        <pentry minsize="1" maxsize="8" extension="sign">
+          <register name="a0"/>
+        </pentry>
+        <pentry minsize="1" maxsize="8" extension="sign">
+          <register name="a1"/>
+        </pentry>
+        <pentry minsize="1" maxsize="8" extension="sign">
+          <register name="a2"/>
+        </pentry>
+        <pentry minsize="1" maxsize="8" extension="sign">
+          <register name="a3"/>
+        </pentry>
+        <pentry minsize="1" maxsize="8" extension="sign">
+          <register name="t0"/>
+        </pentry>
+        <pentry minsize="1" maxsize="8" extension="sign">
+          <register name="t1"/>
+        </pentry>
+        <pentry minsize="1" maxsize="8" extension="sign">
+          <register name="t2"/>
+        </pentry>
+        <pentry minsize="1" maxsize="8" extension="sign">
+          <register name="t3"/>
+        </pentry>
+        <pentry minsize="1" maxsize="500" align="8">
+          <addr offset="0" space="stack"/>
+        </pentry>
+      </input>
+      <output>
+        <pentry minsize="1" maxsize="4" metatype="float">
+          <register name="f0"/>
+        </pentry>
+        <pentry minsize="1" maxsize="8" extension="sign">
+          <register name="v0"/>
+        </pentry>
+      </output>
+      <unaffected>
+        <register name="s0_qw"/>
+        <register name="s1_qw"/>
+        <register name="s2_qw"/>
+        <register name="s3_qw"/>
+        <register name="s4_qw"/>
+        <register name="s5_qw"/>
+        <register name="s6_qw"/>
+        <register name="s7_qw"/>
+        <register name="s8_qw"/>
+        <register name="gp_qw"/>
+        <register name="sp"/>
+        <register name="f20"/>
+        <register name="f21"/>
+        <register name="f22"/>
+        <register name="f23"/>
+        <register name="f24"/>
+        <register name="f25"/>
+        <register name="f26"/>
+        <register name="f27"/>
+        <register name="f28"/>
+        <register name="f29"/>
+        <register name="f30"/>
+        <register name="f31"/>
+      </unaffected>
+      <killedbycall>
+        <register name="at"/>
+        <register name="v0"/>
+        <register name="v1"/>
+        <register name="f0"/>
+        <register name="f1"/>
+      </killedbycall>
+      <localrange>
+        <range space="stack" first="0xfff0bdc0" last="0xffffffff"/>
+      </localrange>
+    </prototype>
+  </default_proto>
+</compiler_spec>

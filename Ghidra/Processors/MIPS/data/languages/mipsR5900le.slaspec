@@ -1,0 +1,32 @@
+# ###
+# IP: GHIDRA
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ###
+#
+# SLA specification file for the Toshiba/Sony R5900 (PlayStation 2 "Emotion Engine" core),
+# little endian. MIPS III with MOVN/MOVZ/PREF, 128-bit GPRs, the MMI instructions, two
+# multiply/divide pipelines, single-precision FPU and VU0 as COP2 (macro mode).
+# Built like mips64le.slaspec (64-bit registers; the ldefs entry truncates ram to 32 bits),
+# without MIPS16e/microMIPS/DSP. R5900 selects the EE register layout in mips.sinc and leaves out
+# the stock constructors whose encodings the EE reuses; COPR_C leaves out LWC2/SWC2/LDC2/SDC2.
+
+@define ENDIAN "little"
+@define MIPS64 ""
+@define R5900 ""
+@define COPR_C ""
+
+@include "mips.sinc"
+@include "mips32Instructions.sinc"
+@include "mips64Instructions.sinc"
+@include "r5900.sinc"

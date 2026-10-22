@@ -103,19 +103,23 @@
     cacheOp(op:1, OFF_BASER6); 
 }
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :cachee op, OFF_BASER6           is $(AMODE) & prime=0x1F & fct=0x1B & bit6=0 & OFF_BASER6 & op {
     cacheOp(op:1, OFF_BASER6); 
 }
+@endif
 
 :cfc0 RT, RD0                is $(AMODE) & prime=0x10 & copop=2 & RT & RD0 & bigfunct=0 {
     RT = sext( RD0:$(SIZETO4) );
 }
 
 # 0100 1000 010t tttt ssss s000 0000 0000
+@ifndef R5900   # COP2: EE CFC2 with VU0 control registers
 :cfc2 RT, immed                 is $(AMODE) & prime=0x12 & copop=2 & RT & immed {
     tmp:4 = getCopControlWord( 2:1, immed:4 );
     RT = sext(tmp);
 }
+@endif
 
 # Special case of ADDU
 # 0000 0000 0000 0000 dddd d000 0010 0001
@@ -135,25 +139,31 @@ define pcodeop special2;
 # x: 5 y: 0-7
 # x: 6 y: 0-7
 # x: 7 y: 0-6
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI
 :SPECIAL2 RD, RSsrc, RTsrc, sa, fct      is $(AMODE) & prime=0x1C & sa & RD & RSsrc & RTsrc & fct {
     tmp:1 = fct;
     tmp2:1 = sa;
     RD = special2(RSsrc, RTsrc, tmp2, tmp);
 }
+@endif
 
 # 0100 101c cccc cccc cccc cccc cccc cccc
+@ifndef R5900   # COP2 CO: VU0 macro instructions
 :cop2 cofun                     is $(AMODE) & prime=0x12 & bit25=1 & cofun {
     arg:4 = cofun;
     copFunction(2:1, arg);
 }
+@endif
 
 :ctc0 RTsrc, RD0                is $(AMODE) & prime=0x10 & copop=6 & RTsrc & RD0 & bigfunct=0 {
     RD0 = RTsrc;
 }
 # 0100 1000 110t tttt iiii iiii iiii iiii
+@ifndef R5900   # COP2: EE CTC2 with VU0 control registers
 :ctc2 RTsrc, immed              is $(AMODE) & prime=0x12 & copop=6 & RTsrc & immed {
     setCopControlWord( 2:1, immed:4, RTsrc );
 }
+@endif
 
 # 0100 0010 0000 0000 0000 0000 0001 1111 
 :deret                          is $(AMODE) & prime=0x10 & bit25=1 & copfill=0x0 & fct=0x1F {
@@ -201,6 +211,7 @@ define pcodeop special2;
 }
 
 # 0111 11ss ssst tttt mmmm mLLL LL00 0000 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :ext RT, RSsrc, lsb, ExtSize    is $(AMODE) & prime=0x1F & fct=0x0 & RT & RSsrc & lsb & msbd & ExtSize {
     # Extract Bit Field
     # RT = extractField(RSsrc, msbd:1, lsb:1);
@@ -209,8 +220,10 @@ define pcodeop special2;
     rs_tmp = rs_tmp >> ($(REGSIZE) * 8 - (msbd + 1));
     RT = zext(rs_tmp);
 }
+@endif
 
 # 0111 11ss ssst tttt mmmm mLLL LL00 0100
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :ins RT, RSsrc, lsb, InsSize    is $(AMODE) & prime=0x1F & fct=0x04 & RT & RTsrc & RSsrc & lsb & msbd & InsSize {
     tmpa:$(REGSIZE) = -1;
     tmpa = tmpa >> ($(REGSIZE) * 8 - InsSize);
@@ -220,6 +233,7 @@ define pcodeop special2;
     tmpb = tmpb << lsb;
     RT = (RT & tmpa) | tmpb;
 }
+@endif
 
 # 0000 10aa aaaa aaaa aaaa aaaa aaaa aaaa
 :j Abs26                        is $(AMODE) & prime=2 & Abs26 {
@@ -359,63 +373,81 @@ define pcodeop special2;
     RT = sext(*[ram]:1 OFF_BASE);  
 }
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lbe RT, OFF_BASER6           	is $(AMODE) & prime=0x1F & fct=0x2C & bit6=0 & OFF_BASER6 & RT {
     RT = sext(*[ram]:1 OFF_BASER6);  
 }
+@endif
 
 # 1001 00bb bbbt tttt iiii iiii iiii iiii
 :lbu RT, OFF_BASE               is $(AMODE) & prime=0x24 & OFF_BASE & RT {
     RT = zext( *[ram]:1 OFF_BASE );
 }
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lbue RT, OFF_BASER6           	is $(AMODE) & prime=0x1F & fct=0x28 & bit6=0 & OFF_BASER6 & RT {
     RT = zext( *[ram]:1 OFF_BASER6 );
 }
+@endif
 
 # 1000 01bb bbbt tttt iiii iiii iiii iiii
 :lh RT, OFF_BASE                is $(AMODE) & prime=0x21 & OFF_BASE & RT {
     RT = sext( *[ram]:2 OFF_BASE );
 }
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lhe RT, OFF_BASER6           	is $(AMODE) & prime=0x1F & fct=0x2D & bit6=0 & OFF_BASER6 & RT {
     RT = sext( *[ram]:2 OFF_BASER6 );
 }
+@endif
 
 # 1001 01bb bbbt tttt iiii iiii iiii iiii
 :lhu RT, OFF_BASE               is $(AMODE) & prime=0x25 & OFF_BASE & RT {
     RT =  zext( *[ram]:2 OFF_BASE ); 
 }
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lhue RT, OFF_BASER6           	is $(AMODE) & prime=0x1F & fct=0x29 & bit6=0 & OFF_BASER6 & RT {
     RT =  zext( *[ram]:2 OFF_BASER6 ); 
 }
+@endif
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lle RT, OFF_BASER6           	is $(AMODE) & prime=0x1F & fct=0x2E & bit6=0 & OFF_BASER6 & RT {
     RT = sext(*[ram]:4 OFF_BASER6);
 }
+@endif
 
 # 1000 11bb bbbt tttt iiii iiii iiii iiii
 :lw RT, OFF_BASE                is $(AMODE) & prime=0x23 & OFF_BASE & RT {
     RT = sext( *[ram]:4 OFF_BASE );
 }
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lwe RT, OFF_BASER6           	is $(AMODE) & prime=0x1F & fct=0x2F & bit6=0 & OFF_BASER6 & RT {
     RT = sext( *[ram]:4 OFF_BASER6 );
 }
+@endif
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lbx RD, INDEX_BASE		is $(AMODE) & prime=0x1F & RD & fct=10 & fct2=22 & INDEX_BASE {
     RD = sext(*[ram]:1 INDEX_BASE);
 }
+@endif
 
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lhux RD, INDEX_BASE		is $(AMODE) & prime=0x1F & RD & fct=10 & fct2=20 & INDEX_BASE {
     RD = zext(*[ram]:2 INDEX_BASE);
 }
+@endif
 
 @ifdef MIPS64
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lwux RD, INDEX_BASE		is $(AMODE) & prime=0x1F & RD & fct=10 & fct2=16 & INDEX_BASE {
     RD = zext(*[ram]:4 INDEX_BASE);
 }
+@endif
 @endif
 
 # 0100 0000 000t tttt dddd d000 0000 0sss
@@ -424,16 +456,20 @@ define pcodeop special2;
 }
 
 # 0100 1000 000t tttt iiii iiii iiii iiii
+@ifndef R5900   # COP2: no MFC2 on the EE (QMFC2)
 :mfc2 RT, immed                 is $(AMODE) & prime=0x12 & copop=0 & RT & immed {
     tmp:4 = getCopReg(2:1, immed:4);
     RT = sext( tmp );
 }
+@endif
 
 # 0100 1000 011t tttt iiii iiii iiii iiii
+@ifndef R5900   # COP2: no MFHC2 on the EE
 :mfhc2 RT, immed                is $(AMODE) & prime=0x12 & copop=3 & RT & fs & immed {
     tmp:4 = getCopReg(2:1, immed:4);
     RT = sext(tmp >> 32);
 }
+@endif
 
 # Special case of ADDIU
 # 0010 0100 000t tttt iiii iiii iiii iiii
@@ -457,9 +493,11 @@ define pcodeop special2;
 }
 
 # 0100 1000 100t tttt iiii iiii iiii iiii
+@ifndef R5900   # COP2: no MTC2 on the EE (QMTC2)
 :mtc2 RTsrc, immed              is $(AMODE) & prime=0x12 & copop=4 & RTsrc & immed {
     setCopReg(2:1, immed:4, RTsrc);
 }
+@endif
 
 :mthc0 RTsrc, RD0, sel          is $(AMODE) & prime=0x10 & copop=6 & RTsrc & RD0 & zero6=0 & sel {
     tmp:4 = RTsrc:$(SIZETO4);
@@ -469,6 +507,7 @@ define pcodeop special2;
 }
 
 # 0100 1000 111t tttt iiii iiii iiii iiii
+@ifndef R5900   # COP2: no MTHC2 on the EE
 :mthc2 RTsrc, immed             is $(AMODE) & prime=0x12 & copop=0x07 & RTsrc & immed {
     arg:4 = immed;
     tmp:4 = RTsrc:$(SIZETO4);
@@ -476,6 +515,7 @@ define pcodeop special2;
     val:8 = (zext(tmp) << 32) + zext(low);
     setCopReg(2:1, arg, val);
 }
+@endif
 
 :nal             				is $(AMODE) & REL6=0 & prime=1 & cond=0x10 & zero21=0 {
 	delayslot(1);
@@ -507,14 +547,18 @@ define pcodeop special2;
     prefetch(OFF_BASE, hint:1); 
 }
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :prefe hint, OFF_BASER6         is $(AMODE) & prime=0x1F & fct=0x23 & bit6=0 & OFF_BASER6 & hint {
     prefetch(OFF_BASER6, hint:1); 
 }        
+@endif
 
 # 0111 1100 000t tttt dddd d000 0011 1011
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :rdhwr RT, rd_hw                is $(AMODE) & prime=0x1F & rs=0 & fct2=0 & fct=0x3B & RT & rd_hw & rd!=4 {
     RT = getHWRegister(rd_hw);
 }
+@endif
 
 # 0111 1100 000t tttt dddd d000 0011 1011
 :rdhwr RT, rd_hw, sel_0608      is $(AMODE) & REL6=1 & prime=0x1F & rs=0 & spec2=0 & fct=0x3B & RT & rd_hw & rd=4 & sel_0608 {
@@ -551,19 +595,25 @@ define pcodeop special2;
     *[ram]:1 OFF_BASE = RTsrc:1;
 }
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :sbe RTsrc, OFF_BASER6          is $(AMODE) & prime=0x1F & fct=0x1C & bit6=0 & OFF_BASER6 & RTsrc {
     *[ram]:1 OFF_BASER6 = RTsrc:1;
 }
+@endif
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :sce RTsrc, OFF_BASER6          is $(AMODE) & prime=0x1F & fct=0x1E & bit6=0 & OFF_BASER6 & RTsrc {
     *[ram]:4 OFF_BASER6 = RTsrc:$(SIZETO4);
     RTsrc = 1;
 }
+@endif
 
 # 0111 00cc cccc cccc cccc cccc cc11 1111
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI
 :sdbbp breakcode                is $(AMODE) & prime=0x1C & fct=0x3F & breakcode {
     signalDebugBreakpointException();
 }
+@endif
 
 @ifndef COPR_C
 # 1111 10bb bbbt tttt iiii iiii iiii iiii        
@@ -573,21 +623,27 @@ define pcodeop special2;
 @endif
 
 # 0111 1100 000t tttt dddd d100 0010 0000
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :seb RD, RTsrc                  is $(AMODE) & prime=0x1F & rs=0 & fct2=0x10 & fct=0x20 & RD & RTsrc {
     RD = sext( RTsrc:1 );
 }
+@endif
 # 0111 1100 000t tttt dddd d110 0010 0000
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :seh RD, RTsrc                  is $(AMODE) & prime=0x1F & rs=0 & fct2=0x18 & fct=0x20 & RD & RTsrc {
     RD = sext( RTsrc:2 );  
 }
+@endif
 # 1010 01bb bbbt tttt iiii iiii iiii iiii
 :sh RTsrc, OFF_BASE             is $(AMODE) & prime=0x29 & OFF_BASE & RTsrc {
     *[ram]:2 OFF_BASE = RTsrc:2;  
 }
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :she RTsrc, OFF_BASER6          is $(AMODE) & prime=0x1F & fct=0x1D & bit6=0 & OFF_BASER6 & RTsrc {
     *[ram]:2 OFF_BASER6 = RTsrc:2;  
 }
+@endif
 
 # 0000 0000 000t tttt dddd daaa aa00 0000
 :sll RD32, RT32src, sa              is $(AMODE) & prime=0 & fct=0 & rs=0 & RD32 & RT32src & sa & RD {
@@ -684,9 +740,11 @@ define pcodeop special2;
 }
 @endif
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :swe RTsrc, OFF_BASER6          is $(AMODE) & prime=0x1F & fct=0x1F & bit6=0 & OFF_BASER6 & RTsrc {
     *[ram]:4 OFF_BASER6 = RTsrc:$(SIZETO4);    
 }
+@endif
 
 define pcodeop SYNC;
 
@@ -797,6 +855,7 @@ define pcodeop SYNC;
 }
 
 # 0111 1100 000t tttt dddd d000 1010 0000
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :wsbh RD, RTsrc                 is $(AMODE) & prime=0x1F & format=0 & RTsrc & RD & wsbh=2 & bshfl=0x20 {
     tmp1:$(REGSIZE) = RTsrc & 0xff; 
     tmp2:$(REGSIZE) = (RTsrc >> 8) & 0xff;
@@ -804,6 +863,7 @@ define pcodeop SYNC;
     tmp4:$(REGSIZE) = (RTsrc >> 24) & 0xff;
     RD = (tmp3 << 24) | (tmp4 << 16) | (tmp1 << 8) | (tmp2); 
 }
+@endif
 
 # 0000 00ss ssst tttt dddd d000 0010 0110
 :xor RD, RSsrc, RTsrc           is $(AMODE) & prime=0 & fct=0x26 & RSsrc & RTsrc & RD & sa=0 {
@@ -870,57 +930,73 @@ define pcodeop SYNC;
 }
 
 # 0100 1001 000c cc00 iiii iiii iiii iiii
+@ifndef R5900   # COP2 BC2: EE form without cc
 :bc2f Rel16                     is $(AMODE) & REL6=0 & prime=0x12 & copop=8 & cc=0 & nd=0 & tf=0 & Rel16 {
     tmp:1 = getCopCondition(2:1, 0:1); 
     delayslot(1); 
     if (tmp != 0) goto inst_next; 
     goto Rel16; 
 }
+@endif
+@ifndef R5900   # COP2 BC2: EE form without cc
 :bc2f cc,Rel16                  is $(AMODE) & REL6=0 & prime=0x12 & copop=8 & cc & nd=0 & tf=0 & Rel16 {
     tmp:1 = getCopCondition(2:1, cc:1); 
     delayslot(1); 
     if (tmp != 0) goto inst_next; 
     goto Rel16; 
 }
+@endif
 # 0100 1001 000c cc10 iiii iiii iiii iiii
+@ifndef R5900   # COP2 BC2: EE form without cc
 :bc2fl Rel16                    is $(AMODE) & REL6=0 & prime=0x12 & copop=8 & cc=0 & nd=1 & tf=0 & Rel16 {
     tmp:1 = getCopCondition(2:1, 0:1); 
     if (tmp != 0) goto inst_next; 
     delayslot(1); 
     goto Rel16; 
 }
+@endif
+@ifndef R5900   # COP2 BC2: EE form without cc
 :bc2fl cc,Rel16                 is $(AMODE) & REL6=0 & prime=0x12 & copop=8 & cc & nd=1 & tf=0 & Rel16 {
     tmp:1 = getCopCondition(2:1, cc:1); 
     if (tmp != 0) goto inst_next; 
     delayslot(1); 
     goto Rel16; 
 }
+@endif
 # 0100 1001 000c cc01 iiii iiii iiii iiii
+@ifndef R5900   # COP2 BC2: EE form without cc
 :bc2t Rel16                     is $(AMODE) & REL6=0 & prime=0x12 & copop=8 & cc=0 & nd=0 & tf=1 & Rel16 {
     tmp:1 = getCopCondition(2:1, 0:1); 
     delayslot(1); 
     if (tmp == 0) goto inst_next; 
     goto Rel16; 
 }
+@endif
+@ifndef R5900   # COP2 BC2: EE form without cc
 :bc2t cc,Rel16                  is $(AMODE) & REL6=0 & prime=0x12 & copop=8 & cc & nd=0 & tf=1 & Rel16 {
     tmp:1 = getCopCondition(2:1, cc:1); 
     delayslot(1); 
     if (tmp == 0) goto inst_next; 
     goto Rel16; 
 }
+@endif
 # 0100 1001 000c cc11 iiii iiii iiii iiii
+@ifndef R5900   # COP2 BC2: EE form without cc
 :bc2tl Rel16                    is $(AMODE) & REL6=0 & prime=0x12 & copop=8 & cc=0 & nd=1 & tf=1 & Rel16 {
     tmp:1 = getCopCondition(2:1, 0:1); 
     if (tmp == 0) goto inst_next; 
     delayslot(1); 
     goto Rel16; 
 }
+@endif
+@ifndef R5900   # COP2 BC2: EE form without cc
 :bc2tl cc,Rel16                 is $(AMODE) & REL6=0 & prime=0x12 & copop=8 & cc & nd=1 & tf=1 & Rel16 {
     tmp:1 = getCopCondition(2:1, cc:1); 
     if (tmp == 0) goto inst_next; 
     delayslot(1); 
     goto Rel16; 
 }
+@endif
 
 # 0101 00ss ssst tttt iiii iiii iiii iiii
 :beql RSsrc, RTsrc, Rel16       is $(AMODE) & REL6=0 & prime=0x14 & RSsrc & RTsrc & Rel16 {
@@ -991,16 +1067,20 @@ define pcodeop SYNC;
 }
 
 # 0111 00ss ssst tttt dddd d000 0010 0001
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI (MADDU1)
 :clo RD, RSsrc                  is $(AMODE) & REL6=0 & prime=0x1C & sa=0x0 & fct=0x21 & RD & RSsrc {
     # Count leading ones in a word
     RD = lzcount( ~RSsrc );
 }
+@endif
 
 # 0111 00ss ssst tttt dddd d000 0010 0000
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI (MADD1)
 :clz RD, RSsrc                  is $(AMODE) & REL6=0 & prime=0x1C & sa=0x0 & fct=0x20 & RD & RSsrc {
     # Count leading zeros in a word
     RD = lzcount( RSsrc );
 }
+@endif
 
 # 0000 00ss ssst tttt 0000 0000 0001 1010
 :div RS32src, RT32src               is $(AMODE) & REL6=0 & prime=0 & fct=0x1A & RS32src & RT32src & rd=0 & sa=0 {
@@ -1066,6 +1146,7 @@ define pcodeop SYNC;
     valLoad:4 = *(addr) >> ((3-shft) * 8);
     RT = sext( valOrig | valLoad );
 }
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lwle RTsrc, OFF_BASER6         is $(AMODE) & REL6=0 & prime=0x1F & fct=0x19 & bit6=0 & OFF_BASER6 & RTsrc & RT {
     shft:$(ADDRSIZE) = OFF_BASER6 & 0x3; 
     addr:$(ADDRSIZE) = OFF_BASER6 - shft; 
@@ -1073,7 +1154,9 @@ define pcodeop SYNC;
     valLoad:4 = *(addr) << (shft * 8);     
     RT = sext( valLoad | valOrig );            
 }
+@endif
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lwre RTsrc, OFF_BASER6         is $(AMODE) & REL6=0 & prime=0x1F & fct=0x1A & bit6=0 & OFF_BASER6 & RTsrc & RT {
     shft:$(ADDRSIZE) = OFF_BASER6 & 0x3; 
     addr:$(ADDRSIZE) = OFF_BASER6 - shft; 
@@ -1081,6 +1164,7 @@ define pcodeop SYNC;
     valLoad:4 = *(addr) >> ((3-shft) * 8);
     RT = sext( valOrig | valLoad );
 }
+@endif
 @else
 :lwl RT, OFF_BASE               is $(AMODE) & REL6=0 & prime=0x22 & OFF_BASE & RT & RTsrc {
     shft:$(ADDRSIZE) = OFF_BASE & 0x3; 
@@ -1098,6 +1182,7 @@ define pcodeop SYNC;
     valLoad:4 = *(addr) >> (shft * 8);
     RT = sext( valOrig | valLoad );
 }
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lwle RTsrc, OFF_BASER6         is $(AMODE) & REL6=0 & prime=0x1F & fct=0x19 & bit6=0 & OFF_BASER6 & RTsrc & RT {
     shft:$(ADDRSIZE) = OFF_BASER6 & 0x3; 
     addr:$(ADDRSIZE) = OFF_BASER6 - shft; 
@@ -1105,7 +1190,9 @@ define pcodeop SYNC;
     valLoad:4 = *(addr) << ((3-shft) * 8);     
     RT = sext( valLoad | valOrig );            
 }
+@endif
 
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :lwre RTsrc, OFF_BASER6         is $(AMODE) & REL6=0 & prime=0x1F & fct=0x1A & bit6=0 & OFF_BASER6 & RTsrc & RT {
     shft:$(ADDRSIZE) = OFF_BASER6 & 0x3; 
     addr:$(ADDRSIZE) = OFF_BASER6 - shft; 
@@ -1113,6 +1200,7 @@ define pcodeop SYNC;
     valLoad:4 = *(addr) >> (shft * 8);
     RT = sext( valOrig | valLoad );
 }
+@endif
 @endif
 
 # lwl and lwr almost always come in pairs. 
@@ -1133,6 +1221,7 @@ define pcodeop SYNC;
 @endif
 
 # 0111 00ss ssst tttt 000a a000 0000 0000
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI: EE MADD has rd
 :madd RS32src, RT32src              is $(AMODE) & REL6=0 & prime=0x1C & zero1315=0x0 & fct2=0x0 & fct=0x0 & RS32src & RT32src & ac=0 & achi & aclo {
     tmp1:8 = sext(RS32src);
     tmp2:8 = sext(RT32src);
@@ -1143,8 +1232,10 @@ define pcodeop SYNC;
     sum = sum >> 32;
     achi = sext(sum:4);
 }
+@endif
 
 # 0111 00ss ssst tttt 000a a000 0000 0001
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI: EE MADDU has rd
 :maddu RS32src, RT32src             is $(AMODE) & REL6=0 & prime=0x1C & zero1315=0x0 & fct2=0x0 & fct=0x01 & RS32src & RT32src & ac=0 & achi & aclo {
     tmp1:8 = zext(RS32src);
     tmp2:8 = zext(RT32src);
@@ -1155,6 +1246,7 @@ define pcodeop SYNC;
     sum = sum >> 32;
     achi = sext(sum:4);
 }
+@endif
 
 # 0000 0000 0aa0 0000 dddd d000 0001 0000
 :mfhi RD                        is $(AMODE) & REL6=0 & prime=0 & fct=0x10 & RD & zero5=0 & zero1620=0 & zero2325=0 & acf=0 & acfhi {
@@ -1182,6 +1274,7 @@ define pcodeop SYNC;
 
 
 # 0111 00ss ssst tttt 000a a000 0000 0100
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI
 :msub RS32src, RT32src              is $(AMODE) & REL6=0 & prime=0x1C & fct2=0 & fct=0x04 & RS32src & RT32src & zero1315=0 & aclo & achi {
     tmp1:8 = sext(RS32src);
     tmp2:8 = sext(RT32src);
@@ -1192,8 +1285,10 @@ define pcodeop SYNC;
     sum = sum >> 32;
     achi = sext(sum:4);
 }
+@endif
 
 # 0111 00ss ssst tttt 000a a000 0000 0101
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI
 :msubu RS32src, RT32src             is $(AMODE) & REL6=0 & prime=0x1C & fct2=0 & fct=0x05 & RS32src & RT32src & zero1315=0 & ac=0 & aclo & achi {
     tmp1:8 = zext(RS32src);
     tmp2:8 = zext(RT32src);
@@ -1204,6 +1299,7 @@ define pcodeop SYNC;
     sum = sum >> 32;
     achi = sext(sum:4);
 }
+@endif
 
 # 0000 00ss sss0 0000 000a a000 0001 0001
 :mthi RSsrc                     is $(AMODE) & REL6=0 & prime=0 & fct=0x11 & RSsrc & zero5=0 & zero1320=0 & ac=0 & achi {
@@ -1216,14 +1312,17 @@ define pcodeop SYNC;
 }
 
 # 0111 00ss ssst tttt dddd d000 0000 0010
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI
 :mul RD, RS32src, RT32src           is $(AMODE) & REL6=0 & prime=0x1C & sa=0x0 & fct=0x02 & RD & RS32src & RT32src {
     tmp1:8 = sext( RS32src );
     tmp2:8 = sext( RT32src );
     prod:8 = tmp1 * tmp2;
     RD = sext( prod:4 );
 }
+@endif
 
 # 0000 00ss ssst tttt 000a a000 0001 1000
+@ifndef R5900   # EE MULT writes rd; rd bits 11-12 are not a DSP accumulator
 :mult RS32src, RT32src              is $(AMODE) & REL6=0 & prime=0 & fct=0x18 & RS32src & RT32src & zero5=0 & zero1315=0 & aclo & achi {
     tmp1:8 = sext( RS32src );
     tmp2:8 = sext( RT32src );
@@ -1232,8 +1331,10 @@ define pcodeop SYNC;
     prod = prod >> 32;
     achi = sext(prod:4);
 }
+@endif
 
 # 0000 00ss ssst tttt 000a a000 0001 1001
+@ifndef R5900   # EE MULTU writes rd; rd bits 11-12 are not a DSP accumulator
 :multu RS32src, RT32src             is $(AMODE) & REL6=0 & prime=0 & fct=0x19 & RS32src & RT32src & zero5=0 & zero1315=0 & aclo & achi {
     tmp1:8 = zext( RS32src );
     tmp2:8 = zext( RT32src );
@@ -1242,6 +1343,7 @@ define pcodeop SYNC;
     prod = prod >> 32;
     achi = sext(prod:4);
 }
+@endif
 
 # 0100 0110 110t tttt ssss sddd dd10 1100
 :pll.ps fd, fs, ft              is $(AMODE) & REL6=0 & prime=0x11 & format=0x16 & fct=0x2C & ft & fs & fd
@@ -1285,6 +1387,7 @@ define pcodeop SYNC;
     valStore:4 = tmpRT << ((3-shft)*8);
     *(addr) = valOrig | valStore;
 }
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :swle RTsrc, OFF_BASER6         is $(AMODE) & REL6=0 & prime=0x1F & fct=0x21 & bit6=0 & OFF_BASER6 & RTsrc & RT {
     tmpRT:4 = RTsrc:$(SIZETO4);  
     shft:$(ADDRSIZE) = OFF_BASER6 & 0x3; 
@@ -1293,6 +1396,8 @@ define pcodeop SYNC;
     valStore:4 = tmpRT >> (shft * 8);
     *(addr) = valOrig | valStore; 
 }
+@endif
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :swre RTsrc, OFF_BASER6         is $(AMODE) & REL6=0 & prime=0x1F & fct=0x22 & bit6=0 & OFF_BASER6 & RTsrc & RT {
     tmpRT:4 = RTsrc:$(SIZETO4);
     shft:$(ADDRSIZE) = OFF_BASER6 & 0x3;      
@@ -1301,6 +1406,7 @@ define pcodeop SYNC;
     valStore:4 = tmpRT << ((3-shft)*8);
     *(addr) = valOrig | valStore;
 }
+@endif
 
 @else
 # 1010 10bb bbbt tttt iiii iiii iiii iiii
@@ -1321,6 +1427,7 @@ define pcodeop SYNC;
     valStore:4 = tmpRT << (shft*8);
     *(addr) = valOrig | valStore;
 }
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :swle RTsrc, OFF_BASER6         is $(AMODE) & REL6=0 & prime=0x1F & fct=0x21 & bit6=0 & OFF_BASER6 & RTsrc & RT {
     tmpRT:4 = RTsrc:$(SIZETO4);  
     shft:$(ADDRSIZE) = OFF_BASER6 & 0x3; 
@@ -1329,6 +1436,8 @@ define pcodeop SYNC;
     valStore:4 = tmpRT >> ((3-shft) * 8);
     *(addr) = valOrig | valStore; 
 }
+@endif
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :swre RTsrc, OFF_BASER6         is $(AMODE) & REL6=0 & prime=0x1F & fct=0x22 & bit6=0 & OFF_BASER6 & RTsrc & RT {
     tmpRT:4 = RTsrc:$(SIZETO4);
     shft:$(ADDRSIZE) = OFF_BASER6 & 0x3;      
@@ -1337,6 +1446,7 @@ define pcodeop SYNC;
     valStore:4 = tmpRT << (shft*8);
     *(addr) = valOrig | valStore;
 }
+@endif
 
 @endif
 
@@ -1586,13 +1696,17 @@ define pcodeop SYNC;
 	RD = sext(tmp);
 }
 
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI (MADDU1)
 :clo RD, RSsrc                  	is $(AMODE) & REL6=1 & prime=0x00 & op=0 & sa=0x1 & fct=0x11 & RD & RSsrc {
     RD = lzcount( ~RSsrc );
 }
+@endif
 
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI (MADD1)
 :clz RD, RSsrc                  	is $(AMODE) & REL6=1 & prime=0x00 & op=0 & sa=0x1 & fct=0x10 & RD & RSsrc {
     RD = lzcount( RSsrc );
 }
+@endif
 
 :div RD, RS32src, RT32src           is $(AMODE) & REL6=1 & prime=0x00 & fct=0x1A & fct2=0x02 & RD & RS32src & RT32src {
 	tmp:4 = RS32src s/ RT32src;
@@ -1689,6 +1803,7 @@ define pcodeop SYNC;
 	RS = sext(*[ram]:4 tmpa);
 }
 
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI
 :mul RD, RS32src, RT32src           is $(AMODE) & REL6=1 & prime=0x00 & fct=0x18 & fct2=0x02 & RD & RS32src & RT32src {
 	tmpS:8 = sext(RS32src);
 	tmpT:8 = sext(RT32src);
@@ -1696,6 +1811,7 @@ define pcodeop SYNC;
 	tmp:4 = tmpS[0,32];
 	RD = sext(tmp);
 }
+@endif
 
 :muh RD, RS32src, RT32src           is $(AMODE) & REL6=1 & prime=0x00 & fct=0x18 & fct2=0x03 & RD & RS32src & RT32src {
 	tmpS:8 = sext(RS32src);
@@ -1950,6 +2066,7 @@ svFramesize: ,val						is svrs_frame_hi=0 & svrs_frame_low=0 [val = 128; ] {expo
 svFramesize: ,val						is svrs_frame_hi & svrs_frame_low [val = ((svrs_frame_hi << 4) | svrs_frame_low) << 3;] {export *[const]:2 val;}
 
 
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI
 :save svRa^svXsregs^svAregs^svFramesize		is $(AMODE) & prime=0x1c & fct=0x1f & save=0x01 & svRa & svXsregs & svAregs & svStat & svFramesize {
 	tsp = sp;
 	build svAregs;
@@ -1961,7 +2078,9 @@ svFramesize: ,val						is svrs_frame_hi & svrs_frame_low [val = ((svrs_frame_hi 
 	tmp:2 = svFramesize;
 	sp = sp - zext(tmp);
 }
+@endif
 
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI
 :restore rsRa^rsXsregs^rsStat^svFramesize	is $(AMODE) & prime=0x1c & fct=0x1f & save=0x00 & rsRa & rsXsregs & rsStat & svFramesize {
 	build svFramesize;
 
@@ -1974,4 +2093,5 @@ svFramesize: ,val						is svrs_frame_hi & svrs_frame_low [val = ((svrs_frame_hi 
 	
 	sp = sp+zext(tmp);
 }
+@endif
 @include "mipsfloat.sinc"

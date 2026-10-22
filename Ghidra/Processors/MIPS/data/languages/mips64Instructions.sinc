@@ -6,35 +6,46 @@
 ############################
 
 # 0111 00ss ssst tttt dddd d000 0010 0101
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI
 :dclo RD, RSsrc                 is $(AMODE) & ((REL6=0 & prime=0x1C & sa=0x0 & fct=0x25) | (REL6=1 & prime=0x00 & sa=0x1 & fct=0x13 & op=0)) & RD & RSsrc {
     RD = lzcount( ~RSsrc );
 }
+@endif
 # 0111 00ss ssst tttt dddd d000 0010 0100
+@ifndef R5900   # SPECIAL2 (0x1C) is MMI
 :dclz RD, RSsrc                 is $(AMODE) & ((REL6=0 & prime=0x1C & sa=0x0 & fct=0x24) | (REL6=1 & prime=0x00 & sa=0x1 & fct=0x12 & op=0)) & RD & RSsrc {
     RD = lzcount( RSsrc );
 }
+@endif
 
 # 0111 11ss ssst tttt mmmm mLLL LL00 0011
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :dext RT, RSsrc, lsb, ExtSize       is $(AMODE) & prime=0x1F & fct=0x03 & RT & RSsrc & lsb & msbd & ExtSize {
     val:8 = (RSsrc >> lsb);
     val = val & (0xffffffff >> (32 - ExtSize));
     RT = zext(val);
 }
+@endif
 
 # 0111 11ss ssst tttt mmmm mLLL LL00 0001
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :dextm RT, RSsrc, lsb, DextmSize    is $(AMODE) & prime=0x1F & fct=0x01 & RT & RSsrc & lsb & msbd & DextmSize {
     val:8 = (RSsrc >> lsb);
     val = val & (0xffffffffffffffff >> (64 - DextmSize));
     RT = zext(val);
 }
+@endif
 # 0111 11ss ssst tttt mmmm mLLL LL00 0010
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :dextu RT, RSsrc, DXuPos, ExtSize   is $(AMODE) & prime=0x1F & fct=0x02 & RT & RSsrc & lsb & msbd & DXuPos & ExtSize {
     val:8 = (RSsrc >> DXuPos);
     val = val & (0xffffffff >> (32 - ExtSize));
     RT = zext(val);
 }
+@endif
 
 # 0111 11ss ssst tttt mmmm mLLL LL00 0111
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :dins RT, RSsrc, lsb, InsSize       is $(AMODE) & prime=0x1F & fct=0x07 & RT & RTsrc & RSsrc & lsb & msbd & InsSize {
 	tmpa:$(REGSIZE) = -1;
 	tmpa = tmpa >> ($(REGSIZE)*8 - InsSize);
@@ -44,8 +55,10 @@
 	tmpb = tmpb << lsb;
 	RT = (RT & tmpa) | tmpb;
 }
+@endif
 
 # 0111 11ss ssst tttt mmmm mLLL LL00 0101
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :dinsm RT, RSsrc, lsb, DinsXSize    is $(AMODE) & prime=0x1F & fct=0x05 & RT & RTsrc & RSsrc & lsb & msbd & DinsXSize {
 	tmpa:$(REGSIZE) = -1;
 	tmpa = tmpa >> ($(REGSIZE)*8 - DinsXSize);
@@ -55,8 +68,10 @@
 	tmpb = tmpb << lsb;
 	RT = (RT & tmpa) | tmpb;
 }
+@endif
 
 # 0111 11ss ssst tttt mmmm mLLL LL00 0110
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :dinsu RT, RSsrc, DXuPos, InsSize is $(AMODE) & prime=0x1F & fct=0x06 & RT & RTsrc & RSsrc & lsb & msbd & DXuPos & InsSize {
 	tmpa:$(REGSIZE) = -1;
 	tmpa = tmpa >> ($(REGSIZE)*8 - InsSize);
@@ -66,29 +81,38 @@
 	tmpb = tmpb << DXuPos;
 	RT = (RT & tmpa) | tmpb;
 }
+@endif
 
 # 0100 0000 001t tttt dddd d000 0000 0eee
 :dmfc0 RT, RD0                  is $(AMODE) & prime=16 & copop=1 & RT & RD0 & zero6=0 {    
     RT = RD0;
 }
+@ifndef R5900   # no 64-bit FPRs on the EE
 :dmfc1 RT, fs                   is $(AMODE) & prime=17 & copop=1 & RT & fs & bigfunct=0 {    
     RT = fs;
 }
+@endif
+@ifndef R5900   # COP2: EE QMFC2
 :dmfc2 RT, immed                is $(AMODE) & prime=18 & copop=1 & RT & immed {
     RT = getCopReg(2:1, immed:4);
 }
+@endif
 
 # 0100 0000 101t tttt dddd d000 0000 0eee
 :dmtc0 RTsrc, RD0               is $(AMODE) & prime=16 & copop=5 & RTsrc & RD0 & zero6=0 {    
     RD0 = RTsrc;
 }
 # 0100 0100 101t tttt ssss s000 0000 0000
+@ifndef R5900   # no 64-bit FPRs on the EE
 :dmtc1 RTsrc, fs                is $(AMODE) & prime=17 & copop=5 & RTsrc & fs & bigfunct=0 {
     fs = RTsrc;
 }
+@endif
+@ifndef R5900   # COP2: EE QMTC2
 :dmtc2 RTsrc, immed             is $(AMODE) & prime=18 & copop=5 & RTsrc & immed {
     setCopReg(2:1, immed:4, RTsrc);
 }
+@endif
 
 # 0000 0000 001t tttt dddd daaa aa11 1010
 :drotr RD, RTsrc, sa            is $(AMODE) & prime=0x0 & zero1=0x0 & bit21=0x1 & fct=0x3A & RD & RTsrc & sa {
@@ -115,6 +139,7 @@
 }
 
 # 0111 1100 000t tttt dddd d000 1010 0100
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :dsbh RD, RTsrc                 is $(AMODE) & prime=0x1F & rs=0x0 & fct2=0x02 & fct=0x24 & RD & RTsrc { 
     tmp1:8 = RTsrc & 0xff; 
     tmp2:8 = (RTsrc >> 8) & 0xff;
@@ -127,7 +152,9 @@
     RD = (tmp7 << 56) | (tmp8 << 48) | (tmp5 << 40) | (tmp6 << 32) 
         | (tmp3 << 24) | (tmp4 << 16) | (tmp1 << 8) | (tmp2);       
 }
+@endif
 # 0111 1100 000t tttt dddd d001 0110 0100
+@ifndef R5900   # SPECIAL3 (0x1F) is SQ
 :dshd RD, RTsrc                 is$(AMODE) &  prime=0x1F & rs=0x0 & fct2=0x05 & fct=0x24 & RD & RTsrc {
     tmp1:8 = RTsrc & 0xffff;
     tmp2:8 = (RTsrc >> 16) & 0xffff;
@@ -135,6 +162,7 @@
     tmp4:8 = (RTsrc >> 48) & 0xffff;
     RD = (tmp1 << 48) | (tmp2 << 32) | (tmp3 << 16) | tmp4;
 }
+@endif
 
 # 0000 0000 000t tttt dddd daaa aa11 1000
 :dsll RD, RTsrc, sa             is $(AMODE) & prime=0 & fct=56 & rs=0 & RTsrc & RD & sa {

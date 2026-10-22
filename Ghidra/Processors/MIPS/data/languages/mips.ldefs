@@ -408,4 +408,18 @@
     <external_name tool="IDA-PRO" name="mipsl"/>
     <external_name tool="DWARF.register.mapping.file" name="mips.dwarf"/>
   </language>
+  <language processor="MIPS"
+            endian="little"
+            size="32"
+            variant="R5900"
+            version="1.0"
+            slafile="mipsR5900le.sla"
+            processorspec="mipsR5900.pspec"
+            id="MIPS:LE:64:R5900">
+    <description>Toshiba/Sony R5900 Emotion Engine (PlayStation 2)</description>
+    <truncate_space space="ram" size="4"/>
+    <compiler name="default" spec="mipsR5900.cspec" id="default"/>
+    <external_name tool="gnu" name="mips:5900"/>
+    <external_name tool="DWARF.register.mapping.file" name="mips.dwarf"/>
+  </language>
 </language_definitions>

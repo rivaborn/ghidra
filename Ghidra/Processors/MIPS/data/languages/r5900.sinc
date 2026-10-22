@@ -1,0 +1,1146 @@
+# ###
+# IP: GHIDRA
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ###
+#
+# Toshiba/Sony R5900 ("Emotion Engine" core, PlayStation 2 main CPU) additions.
+#
+# Included by mipsR5900le.slaspec after mips.sinc, mips32Instructions.sinc and
+# mips64Instructions.sinc, which are compiled with R5900 and COPR_C defined. Under R5900:
+#   - mips.sinc gives the GPRs, HI and LO 128-bit views (<gpr>_qw / <gpr>_ud, lo_qw / hi_qw,
+#     lo1 / hi1) and 32-bit FPRs (FREGSIZE 4);
+#   - the stock constructors whose encodings the EE reuses (SPECIAL2 = MMI, SPECIAL3 = SQ,
+#     COP2 transfers, MULT/MULTU, SQRT.S/RSQRT.S, C.OLT.S/C.OLE.S, ...) are left out;
+#   - COPR_C leaves out LWC2/SWC2/LDC2/SDC2 (the EE has LQC2/SQC2 instead).
+#
+# Contents:
+#   - 128-bit loads/stores LQ/SQ (opcodes 0x1E/0x1F);
+#   - 3-operand MULT/MULTU, MFSA/MTSA/MTSAB/MTSAH, SYNC.L/SYNC.P;
+#   - the MMI opcode (0x1C) with its MMI0..MMI3 groups, pipeline-1 HI1/LO1 instructions;
+#   - EE COP0 forms (EI/DI, BC0x, MFBPC.., MFPS/MFPC..);
+#   - the EE single-precision COP1 additions (ADDA.S .. MSUBA.S, MAX.S/MIN.S, C.LT.S/C.LE.S,
+#     SQRT.S fd,ft, RSQRT.S fd,fs,ft);
+#   - COP2 = VU0 in macro mode: QMFC2/QMTC2/CFC2/CTC2/BC2x/LQC2/SQC2 and the macro
+#     instructions (pcodeop calls; see the end of this file).
+#
+# Notes on the model:
+#   - LQ/SQ/LQC2/SQC2 use the effective address as is. The hardware ignores its low 4 bits;
+#     masking it here would hide every sq/lq stack slot from the decompiler.
+#   - SA (shift amount register) holds a byte count (0..15): MTSAB stores (rs ^ imm) & 15,
+#     MTSAH stores ((rs ^ imm) & 7) * 2, QFSRV shifts by SA * 8 bits.
+#   - Halfword/byte parallel operations, saturating operations and all VU0 macro operations
+#     are pcodeop calls; word/doubleword moves, logic, multiplies and divides have p-code.
+
+# ---------------------------------------------------------------------------------------
+# Registers
+
+# VU0 floating-point registers (128-bit, 4 x float32: x = bytes 0-3, y 4-7, z 8-11, w 12-15)
+define register offset=0x5000 size=16 [
+    vf0  vf1  vf2  vf3  vf4  vf5  vf6  vf7  vf8  vf9  vf10 vf11 vf12 vf13 vf14 vf15
+    vf16 vf17 vf18 vf19 vf20 vf21 vf22 vf23 vf24 vf25 vf26 vf27 vf28 vf29 vf30 vf31
+];
+
+# VU0 integer registers vi0..vi15 and the control registers vi16..vi31 (CFC2/CTC2 numbering)
+define register offset=0x5200 size=4 [
+    vi0  vi1  vi2  vi3  vi4  vi5  vi6  vi7  vi8  vi9  vi10 vi11 vi12 vi13 vi14 vi15
+    vu0_status vu0_mac vu0_clipping vu0_cr19 vu0_r vu0_i vu0_q vu0_cr23
+    vu0_cr24 vu0_cr25 vu0_tpc vu0_cmsar0 vu0_fbrst vu0_vpu_stat vu0_cr30 vu0_cmsar1
+];
+
+define register offset=0x5280 size=16 [ vu0_acc ];      # VU0 accumulator (ACC)
+define register offset=0x5290 size=4  [ SA fpu_acc ];   # shift amount; FPU accumulator (ACC)
+
+# COP0 debug (breakpoint) and performance-counter registers
+define register offset=0x52A0 size=4 [ BPC IAB IABM DAB DABM DVB DVBM PCCR PCR0 PCR1 ];
+
+# EE COP0 register numbers that differ from the MIPS32 names used by mips.sinc
+define register offset=0x5300 size=$(REGSIZE) [
+    BadPAddr Perf cop0_ee7 cop0_ee17 cop0_ee18 cop0_ee19 cop0_ee20 cop0_ee26 cop0_ee27 cop0_ee31
+];
+
+# ---------------------------------------------------------------------------------------
+# Field attachments (the ee_* fields are defined in the instr token of mips.sinc under R5900)
+
+attach variables [ ee_rsq ee_rtq ee_rdq ] [
+    zero_qw at_qw v0_qw v1_qw a0_qw a1_qw a2_qw a3_qw
+    t0_qw   t1_qw t2_qw t3_qw t4_qw t5_qw t6_qw t7_qw
+    s0_qw   s1_qw s2_qw s3_qw s4_qw s5_qw s6_qw s7_qw
+    t8_qw   t9_qw k0_qw k1_qw gp_qw sp_qw s8_qw ra_qw
+];
+
+attach variables [ ee_vft ee_vfs ee_vfd ] [
+    vf0  vf1  vf2  vf3  vf4  vf5  vf6  vf7  vf8  vf9  vf10 vf11 vf12 vf13 vf14 vf15
+    vf16 vf17 vf18 vf19 vf20 vf21 vf22 vf23 vf24 vf25 vf26 vf27 vf28 vf29 vf30 vf31
+];
+
+attach variables [ ee_vit ee_vis ee_vid ] [
+    vi0  vi1  vi2  vi3  vi4  vi5  vi6  vi7  vi8  vi9  vi10 vi11 vi12 vi13 vi14 vi15
+    _    _    _    _    _    _    _    _    _    _    _    _    _    _    _    _
+];
+
+attach variables [ ee_ctl ] [
+    vi0  vi1  vi2  vi3  vi4  vi5  vi6  vi7  vi8  vi9  vi10 vi11 vi12 vi13 vi14 vi15
+    vu0_status vu0_mac vu0_clipping vu0_cr19 vu0_r vu0_i vu0_q vu0_cr23
+    vu0_cr24 vu0_cr25 vu0_tpc vu0_cmsar0 vu0_fbrst vu0_vpu_stat vu0_cr30 vu0_cmsar1
+];
+
+attach variables [ ee_c0r ] [
+    Index    Random   EntryLo0 EntryLo1 Context  PageMask Wired    cop0_ee7
+    BadVAddr Count    EntryHi  Compare  Status   Cause    EPC      PRId
+    Config   cop0_ee17 cop0_ee18 cop0_ee19 cop0_ee20 cop0_reg21 cop0_reg22 BadPAddr
+    Debug    Perf     cop0_ee26 cop0_ee27 TagLo  TagHi    ErrorEPC cop0_ee31
+];
+
+# 128-bit GPR operands; the display uses the ordinary register name
+RSQ: rs     is rs & ee_rsq          { export ee_rsq; }
+RSQ: rs     is rs & ee_rsq & rs=0   { local z:16 = zext(0:8); export z; }
+RTQ: rt     is rt & ee_rtq          { export ee_rtq; }
+RTQ: rt     is rt & ee_rtq & rt=0   { local z:16 = zext(0:8); export z; }
+RDQ: rd     is rd & ee_rdq          { export ee_rdq; }
+
+# Assemble a 128-bit value from four 32-bit words (w0 = least significant)
+macro pack4w(dst, w0, w1, w2, w3) {
+    local q0:16 = zext(w0);
+    local q1:16 = zext(w1);
+    local q2:16 = zext(w2);
+    local q3:16 = zext(w3);
+    dst = (q3 << 96) | (q2 << 64) | (q1 << 32) | q0;
+}
+
+# Assemble a 128-bit value from two 64-bit doublewords
+macro pack2d(dst, d0, d1) {
+    local q0:16 = zext(d0);
+    local q1:16 = zext(d1);
+    dst = (q1 << 64) | q0;
+}
+
+# Split a 128-bit value into four 32-bit words
+macro split4w(src, w0, w1, w2, w3) {
+    w0 = src:4;
+    w1 = src(4);
+    w2 = src(8);
+    w3 = src(12);
+}
+
+# ---------------------------------------------------------------------------------------
+# 128-bit loads and stores
+
+# 0111 10bb bbbt tttt iiii iiii iiii iiii
+:lq RT, OFF_BASE            is prime=0x1E & OFF_BASE & RT & ee_rtq {
+    ee_rtq = *[ram]:16 OFF_BASE;
+}
+
+# 0111 11bb bbbt tttt iiii iiii iiii iiii
+:sq RTQ, OFF_BASE           is prime=0x1F & OFF_BASE & RTQ {
+    *[ram]:16 OFF_BASE = RTQ;
+}
+
+# ---------------------------------------------------------------------------------------
+# SPECIAL / REGIMM additions
+
+# 0000 00ss ssst tttt dddd d000 0001 1000
+:mult RS32src, RT32src      is prime=0 & fct=0x18 & sa=0 & rd=0 & RS32src & RT32src {
+    local prod:8 = sext(RS32src) * sext(RT32src);
+    lo = sext(prod:4);
+    local ph:4 = prod(4);
+    hi = sext(ph);
+}
+:mult RD, RS32src, RT32src  is prime=0 & fct=0x18 & sa=0 & RD & RS32src & RT32src {
+    local prod:8 = sext(RS32src) * sext(RT32src);
+    lo = sext(prod:4);
+    local ph:4 = prod(4);
+    hi = sext(ph);
+    RD = lo;
+}
+
+# 0000 00ss ssst tttt dddd d000 0001 1001
+:multu RS32src, RT32src     is prime=0 & fct=0x19 & sa=0 & rd=0 & RS32src & RT32src {
+    local prod:8 = zext(RS32src) * zext(RT32src);
+    lo = sext(prod:4);
+    local ph:4 = prod(4);
+    hi = sext(ph);
+}
+:multu RD, RS32src, RT32src is prime=0 & fct=0x19 & sa=0 & RD & RS32src & RT32src {
+    local prod:8 = zext(RS32src) * zext(RT32src);
+    lo = sext(prod:4);
+    local ph:4 = prod(4);
+    hi = sext(ph);
+    RD = lo;
+}
+
+# 0000 0000 0000 0000 dddd d000 0010 1000
+:mfsa RD                    is prime=0 & fct=0x28 & rs=0 & rt=0 & sa=0 & RD {
+    RD = zext(SA);
+}
+
+# 0000 00ss sss0 0000 0000 0000 0010 1001
+:mtsa RSsrc                 is prime=0 & fct=0x29 & rt=0 & rd=0 & sa=0 & RSsrc {
+    SA = RSsrc:4 & 0xF;
+}
+
+# 0000 01ss sss1 1000 iiii iiii iiii iiii
+:mtsab RSsrc, immed         is prime=1 & cond=0x18 & RSsrc & immed {
+    SA = (RSsrc:4 ^ immed) & 0xF;
+}
+
+# 0000 01ss sss1 1001 iiii iiii iiii iiii
+:mtsah RSsrc, immed         is prime=1 & cond=0x19 & RSsrc & immed {
+    SA = ((RSsrc:4 ^ immed) & 0x7) << 1;
+}
+
+# 0000 0000 0000 0000 0000 0000 0000 1111
+:sync.l                     is prime=0 & fct=0xF & szero=0 & stype=0 {
+    SYNC(0:1);
+}
+# 0000 0000 0000 0000 0000 0100 0000 1111
+:sync.p                     is prime=0 & fct=0xF & szero=0 & stype=0x10 {
+    SYNC(0x10:1);
+}
+
+# ---------------------------------------------------------------------------------------
+# MMI (opcode 0x1C): non-parallel instructions and pipeline 1
+
+# 0111 00ss ssst tttt dddd d000 0000 0000
+:madd RS32src, RT32src      is prime=0x1C & fct=0x00 & sa=0 & rd=0 & RS32src & RT32src {
+    local prod:8 = sext(RS32src) * sext(RT32src);
+    local acc:8 = (zext(hi:4) << 32) | zext(lo:4);
+    acc = acc + prod;
+    lo = sext(acc:4);
+    local ah:4 = acc(4);
+    hi = sext(ah);
+}
+:madd RD, RS32src, RT32src  is prime=0x1C & fct=0x00 & sa=0 & RD & RS32src & RT32src {
+    local prod:8 = sext(RS32src) * sext(RT32src);
+    local acc:8 = (zext(hi:4) << 32) | zext(lo:4);
+    acc = acc + prod;
+    lo = sext(acc:4);
+    local ah:4 = acc(4);
+    hi = sext(ah);
+    RD = lo;
+}
+# 0111 00ss ssst tttt dddd d000 0000 0001
+:maddu RS32src, RT32src     is prime=0x1C & fct=0x01 & sa=0 & rd=0 & RS32src & RT32src {
+    local prod:8 = zext(RS32src) * zext(RT32src);
+    local acc:8 = (zext(hi:4) << 32) | zext(lo:4);
+    acc = acc + prod;
+    lo = sext(acc:4);
+    local ah:4 = acc(4);
+    hi = sext(ah);
+}
+:maddu RD, RS32src, RT32src is prime=0x1C & fct=0x01 & sa=0 & RD & RS32src & RT32src {
+    local prod:8 = zext(RS32src) * zext(RT32src);
+    local acc:8 = (zext(hi:4) << 32) | zext(lo:4);
+    acc = acc + prod;
+    lo = sext(acc:4);
+    local ah:4 = acc(4);
+    hi = sext(ah);
+    RD = lo;
+}
+
+# 0111 00ss ssst tttt dddd d000 0010 0000
+:madd1 RS32src, RT32src     is prime=0x1C & fct=0x20 & sa=0 & rd=0 & RS32src & RT32src {
+    local prod:8 = sext(RS32src) * sext(RT32src);
+    local acc:8 = (zext(hi1:4) << 32) | zext(lo1:4);
+    acc = acc + prod;
+    lo1 = sext(acc:4);
+    local ah:4 = acc(4);
+    hi1 = sext(ah);
+}
+:madd1 RD, RS32src, RT32src is prime=0x1C & fct=0x20 & sa=0 & RD & RS32src & RT32src {
+    local prod:8 = sext(RS32src) * sext(RT32src);
+    local acc:8 = (zext(hi1:4) << 32) | zext(lo1:4);
+    acc = acc + prod;
+    lo1 = sext(acc:4);
+    local ah:4 = acc(4);
+    hi1 = sext(ah);
+    RD = lo1;
+}
+# 0111 00ss ssst tttt dddd d000 0010 0001
+:maddu1 RS32src, RT32src     is prime=0x1C & fct=0x21 & sa=0 & rd=0 & RS32src & RT32src {
+    local prod:8 = zext(RS32src) * zext(RT32src);
+    local acc:8 = (zext(hi1:4) << 32) | zext(lo1:4);
+    acc = acc + prod;
+    lo1 = sext(acc:4);
+    local ah:4 = acc(4);
+    hi1 = sext(ah);
+}
+:maddu1 RD, RS32src, RT32src is prime=0x1C & fct=0x21 & sa=0 & RD & RS32src & RT32src {
+    local prod:8 = zext(RS32src) * zext(RT32src);
+    local acc:8 = (zext(hi1:4) << 32) | zext(lo1:4);
+    acc = acc + prod;
+    lo1 = sext(acc:4);
+    local ah:4 = acc(4);
+    hi1 = sext(ah);
+    RD = lo1;
+}
+
+# 0111 00ss sss0 0000 dddd d000 0000 0100
+:plzcw RD, RSsrc            is prime=0x1C & fct=0x04 & rt=0 & sa=0 & RD & RSsrc {
+    # count of leading bits equal to the sign bit, minus one, for each 32-bit word
+    local w0:4 = RSsrc:4;
+    local w1:4 = RSsrc(4);
+    w0 = w0 ^ (w0 s>> 31);
+    w1 = w1 ^ (w1 s>> 31);
+    local c0:4 = lzcount(w0);
+    local c1:4 = lzcount(w1);
+    c0 = c0 - 1;
+    c1 = c1 - 1;
+    RD = (zext(c1) << 32) | zext(c0);
+}
+
+# 0111 0000 0000 0000 dddd d000 0001 0000
+:mfhi1 RD                   is prime=0x1C & fct=0x10 & rs=0 & rt=0 & sa=0 & RD {
+    RD = hi1;
+}
+# 0111 00ss sss0 0000 0000 0000 0001 0001
+:mthi1 RSsrc                is prime=0x1C & fct=0x11 & rt=0 & rd=0 & sa=0 & RSsrc {
+    hi1 = RSsrc;
+}
+# 0111 0000 0000 0000 dddd d000 0001 0010
+:mflo1 RD                   is prime=0x1C & fct=0x12 & rs=0 & rt=0 & sa=0 & RD {
+    RD = lo1;
+}
+# 0111 00ss sss0 0000 0000 0000 0001 0011
+:mtlo1 RSsrc                is prime=0x1C & fct=0x13 & rt=0 & rd=0 & sa=0 & RSsrc {
+    lo1 = RSsrc;
+}
+
+# 0111 00ss ssst tttt dddd d000 0001 1000
+:mult1 RS32src, RT32src     is prime=0x1C & fct=0x18 & sa=0 & rd=0 & RS32src & RT32src {
+    local prod:8 = sext(RS32src) * sext(RT32src);
+    lo1 = sext(prod:4);
+    local ph:4 = prod(4);
+    hi1 = sext(ph);
+}
+:mult1 RD, RS32src, RT32src is prime=0x1C & fct=0x18 & sa=0 & RD & RS32src & RT32src {
+    local prod:8 = sext(RS32src) * sext(RT32src);
+    lo1 = sext(prod:4);
+    local ph:4 = prod(4);
+    hi1 = sext(ph);
+    RD = lo1;
+}
+# 0111 00ss ssst tttt dddd d000 0001 1001
+:multu1 RS32src, RT32src     is prime=0x1C & fct=0x19 & sa=0 & rd=0 & RS32src & RT32src {
+    local prod:8 = zext(RS32src) * zext(RT32src);
+    lo1 = sext(prod:4);
+    local ph:4 = prod(4);
+    hi1 = sext(ph);
+}
+:multu1 RD, RS32src, RT32src is prime=0x1C & fct=0x19 & sa=0 & RD & RS32src & RT32src {
+    local prod:8 = zext(RS32src) * zext(RT32src);
+    lo1 = sext(prod:4);
+    local ph:4 = prod(4);
+    hi1 = sext(ph);
+    RD = lo1;
+}
+# 0111 00ss ssst tttt 0000 0000 0001 1010
+:div1 RS32src, RT32src      is prime=0x1C & fct=0x1A & rd=0 & sa=0 & RS32src & RT32src {
+    lo1 = sext(RS32src s/ RT32src);
+    hi1 = sext(RS32src s% RT32src);
+}
+# 0111 00ss ssst tttt 0000 0000 0001 1011
+:divu1 RS32src, RT32src     is prime=0x1C & fct=0x1B & rd=0 & sa=0 & RS32src & RT32src {
+    lo1 = sext(RS32src / RT32src);
+    hi1 = sext(RS32src % RT32src);
+}
+
+# PMFHL.fmt rd: 0111 0000 0000 0000 dddd dfff ff11 0000
+:pmfhl.lw RDQ               is prime=0x1C & fct=0x30 & rs=0 & rt=0 & ee_mmiop=0 & RDQ {
+    pack4w(RDQ, lo:4, hi:4, lo1:4, hi1:4);
+}
+:pmfhl.uw RDQ               is prime=0x1C & fct=0x30 & rs=0 & rt=0 & ee_mmiop=1 & RDQ {
+    local l1:4 = lo(4);
+    local h1:4 = hi(4);
+    local l3:4 = lo1(4);
+    local h3:4 = hi1(4);
+    pack4w(RDQ, l1, h1, l3, h3);
+}
+define pcodeop pmfhl_slw;
+define pcodeop pmfhl_lh;
+define pcodeop pmfhl_sh;
+:pmfhl.slw RDQ              is prime=0x1C & fct=0x30 & rs=0 & rt=0 & ee_mmiop=2 & RDQ {
+    RDQ = pmfhl_slw(lo_qw, hi_qw);
+}
+:pmfhl.lh RDQ               is prime=0x1C & fct=0x30 & rs=0 & rt=0 & ee_mmiop=3 & RDQ {
+    RDQ = pmfhl_lh(lo_qw, hi_qw);
+}
+:pmfhl.sh RDQ               is prime=0x1C & fct=0x30 & rs=0 & rt=0 & ee_mmiop=4 & RDQ {
+    RDQ = pmfhl_sh(lo_qw, hi_qw);
+}
+
+# PMTHL.LW rs: 0111 00ss sss0 0000 0000 0000 0011 0001
+:pmthl.lw RSQ               is prime=0x1C & fct=0x31 & rt=0 & rd=0 & ee_mmiop=0 & RSQ {
+    local w0:4; local w1:4; local w2:4; local w3:4;
+    split4w(RSQ, w0, w1, w2, w3);
+    lo  = (lo  & 0xFFFFFFFF00000000) | zext(w0);
+    hi  = (hi  & 0xFFFFFFFF00000000) | zext(w1);
+    lo1 = (lo1 & 0xFFFFFFFF00000000) | zext(w2);
+    hi1 = (hi1 & 0xFFFFFFFF00000000) | zext(w3);
+}
+
+# Parallel shifts by an immediate: 0111 0000 000t tttt dddd daaa aaxx xxxx
+define pcodeop psllh;
+define pcodeop psrlh;
+define pcodeop psrah;
+define pcodeop psllw;
+define pcodeop psrlw;
+define pcodeop psraw;
+:psllh RDQ, RTQ, sa         is prime=0x1C & fct=0x34 & rs=0 & RDQ & RTQ & sa { RDQ = psllh(RTQ, sa:1); }
+:psrlh RDQ, RTQ, sa         is prime=0x1C & fct=0x36 & rs=0 & RDQ & RTQ & sa { RDQ = psrlh(RTQ, sa:1); }
+:psrah RDQ, RTQ, sa         is prime=0x1C & fct=0x37 & rs=0 & RDQ & RTQ & sa { RDQ = psrah(RTQ, sa:1); }
+:psllw RDQ, RTQ, sa         is prime=0x1C & fct=0x3C & rs=0 & RDQ & RTQ & sa { RDQ = psllw(RTQ, sa:1); }
+:psrlw RDQ, RTQ, sa         is prime=0x1C & fct=0x3E & rs=0 & RDQ & RTQ & sa { RDQ = psrlw(RTQ, sa:1); }
+:psraw RDQ, RTQ, sa         is prime=0x1C & fct=0x3F & rs=0 & RDQ & RTQ & sa { RDQ = psraw(RTQ, sa:1); }
+
+# ---------------------------------------------------------------------------------------
+# MMI0 (function 0x08), MMI1 (0x28), MMI2 (0x09), MMI3 (0x29): 0111 00ss ssst tttt dddd dooo oo00 1000
+# Instructions with real p-code are below; the pcodeop-only ones follow in the generated part.
+
+:paddw RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x00 & RDQ & RSQ & RTQ {
+    local ws0:4; local ws1:4; local ws2:4; local ws3:4;
+    local wt0:4; local wt1:4; local wt2:4; local wt3:4;
+    split4w(RSQ, ws0, ws1, ws2, ws3);
+    split4w(RTQ, wt0, wt1, wt2, wt3);
+    pack4w(RDQ, ws0 + wt0, ws1 + wt1, ws2 + wt2, ws3 + wt3);
+}
+:psubw RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x01 & RDQ & RSQ & RTQ {
+    local ws0:4; local ws1:4; local ws2:4; local ws3:4;
+    local wt0:4; local wt1:4; local wt2:4; local wt3:4;
+    split4w(RSQ, ws0, ws1, ws2, ws3);
+    split4w(RTQ, wt0, wt1, wt2, wt3);
+    pack4w(RDQ, ws0 - wt0, ws1 - wt1, ws2 - wt2, ws3 - wt3);
+}
+:pextlw RDQ, RSQ, RTQ       is prime=0x1C & fct=0x08 & ee_mmiop=0x12 & RDQ & RSQ & RTQ {
+    local ws0:4; local ws1:4; local ws2:4; local ws3:4;
+    local wt0:4; local wt1:4; local wt2:4; local wt3:4;
+    split4w(RSQ, ws0, ws1, ws2, ws3);
+    split4w(RTQ, wt0, wt1, wt2, wt3);
+    pack4w(RDQ, wt0, ws0, wt1, ws1);
+}
+:ppacw RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x13 & RDQ & RSQ & RTQ {
+    local ws0:4; local ws1:4; local ws2:4; local ws3:4;
+    local wt0:4; local wt1:4; local wt2:4; local wt3:4;
+    split4w(RSQ, ws0, ws1, ws2, ws3);
+    split4w(RTQ, wt0, wt1, wt2, wt3);
+    pack4w(RDQ, wt0, wt2, ws0, ws2);
+}
+:pextuw RDQ, RSQ, RTQ       is prime=0x1C & fct=0x28 & ee_mmiop=0x12 & RDQ & RSQ & RTQ {
+    local ws0:4; local ws1:4; local ws2:4; local ws3:4;
+    local wt0:4; local wt1:4; local wt2:4; local wt3:4;
+    split4w(RSQ, ws0, ws1, ws2, ws3);
+    split4w(RTQ, wt0, wt1, wt2, wt3);
+    pack4w(RDQ, wt2, ws2, wt3, ws3);
+}
+:qfsrv RDQ, RSQ, RTQ        is prime=0x1C & fct=0x28 & ee_mmiop=0x1B & RDQ & RSQ & RTQ {
+    # funnel shift right of rs:rt by SA bytes
+    local sh:16 = zext(SA) << 3;
+    RDQ = (RTQ >> sh) | (RSQ << (128 - sh));
+}
+
+# MMI2 / MMI3 word multiplies and divides (results also go to HI/LO, both pipelines)
+macro pmultw_lane(a, b, l, h, p) {
+    p = sext(a) * sext(b);
+    l = sext(p:4);
+    local ph:4 = p(4);
+    h = sext(ph);
+}
+macro pmultuw_lane(a, b, l, h, p) {
+    p = zext(a) * zext(b);
+    l = sext(p:4);
+    local ph:4 = p(4);
+    h = sext(ph);
+}
+macro pmaddw_lane(a, b, l, h, p) {
+    p = (zext(h:4) << 32) | zext(l:4);
+    p = p + (sext(a) * sext(b));
+    l = sext(p:4);
+    local ph:4 = p(4);
+    h = sext(ph);
+}
+macro pmsubw_lane(a, b, l, h, p) {
+    p = (zext(h:4) << 32) | zext(l:4);
+    p = p - (sext(a) * sext(b));
+    l = sext(p:4);
+    local ph:4 = p(4);
+    h = sext(ph);
+}
+macro pmadduw_lane(a, b, l, h, p) {
+    p = (zext(h:4) << 32) | zext(l:4);
+    p = p + (zext(a) * zext(b));
+    l = sext(p:4);
+    local ph:4 = p(4);
+    h = sext(ph);
+}
+
+:pmaddw RDQ, RSQ, RTQ       is prime=0x1C & fct=0x09 & ee_mmiop=0x00 & RDQ & RSQ & RTQ {
+    local ws0:4 = RSQ:4;  local ws2:4 = RSQ(8);
+    local wt0:4 = RTQ:4;  local wt2:4 = RTQ(8);
+    local p0:8; local p1:8;
+    pmaddw_lane(ws0, wt0, lo, hi, p0);
+    pmaddw_lane(ws2, wt2, lo1, hi1, p1);
+    pack2d(RDQ, p0, p1);
+}
+:pmsubw RDQ, RSQ, RTQ       is prime=0x1C & fct=0x09 & ee_mmiop=0x04 & RDQ & RSQ & RTQ {
+    local ws0:4 = RSQ:4;  local ws2:4 = RSQ(8);
+    local wt0:4 = RTQ:4;  local wt2:4 = RTQ(8);
+    local p0:8; local p1:8;
+    pmsubw_lane(ws0, wt0, lo, hi, p0);
+    pmsubw_lane(ws2, wt2, lo1, hi1, p1);
+    pack2d(RDQ, p0, p1);
+}
+:pmultw RDQ, RSQ, RTQ       is prime=0x1C & fct=0x09 & ee_mmiop=0x0C & RDQ & RSQ & RTQ {
+    local ws0:4 = RSQ:4;  local ws2:4 = RSQ(8);
+    local wt0:4 = RTQ:4;  local wt2:4 = RTQ(8);
+    local p0:8; local p1:8;
+    pmultw_lane(ws0, wt0, lo, hi, p0);
+    pmultw_lane(ws2, wt2, lo1, hi1, p1);
+    pack2d(RDQ, p0, p1);
+}
+:pmadduw RDQ, RSQ, RTQ      is prime=0x1C & fct=0x29 & ee_mmiop=0x00 & RDQ & RSQ & RTQ {
+    local ws0:4 = RSQ:4;  local ws2:4 = RSQ(8);
+    local wt0:4 = RTQ:4;  local wt2:4 = RTQ(8);
+    local p0:8; local p1:8;
+    pmadduw_lane(ws0, wt0, lo, hi, p0);
+    pmadduw_lane(ws2, wt2, lo1, hi1, p1);
+    pack2d(RDQ, p0, p1);
+}
+:pmultuw RDQ, RSQ, RTQ      is prime=0x1C & fct=0x29 & ee_mmiop=0x0C & RDQ & RSQ & RTQ {
+    local ws0:4 = RSQ:4;  local ws2:4 = RSQ(8);
+    local wt0:4 = RTQ:4;  local wt2:4 = RTQ(8);
+    local p0:8; local p1:8;
+    pmultuw_lane(ws0, wt0, lo, hi, p0);
+    pmultuw_lane(ws2, wt2, lo1, hi1, p1);
+    pack2d(RDQ, p0, p1);
+}
+:pdivw RSQ, RTQ             is prime=0x1C & fct=0x09 & ee_mmiop=0x0D & rd=0 & RSQ & RTQ {
+    local ws0:4 = RSQ:4;  local ws2:4 = RSQ(8);
+    local wt0:4 = RTQ:4;  local wt2:4 = RTQ(8);
+    lo  = sext(ws0 s/ wt0);
+    hi  = sext(ws0 s% wt0);
+    lo1 = sext(ws2 s/ wt2);
+    hi1 = sext(ws2 s% wt2);
+}
+:pdivuw RSQ, RTQ            is prime=0x1C & fct=0x29 & ee_mmiop=0x0D & rd=0 & RSQ & RTQ {
+    local ws0:4 = RSQ:4;  local ws2:4 = RSQ(8);
+    local wt0:4 = RTQ:4;  local wt2:4 = RTQ(8);
+    lo  = sext(ws0 / wt0);
+    hi  = sext(ws0 % wt0);
+    lo1 = sext(ws2 / wt2);
+    hi1 = sext(ws2 % wt2);
+}
+
+# Variable word shifts: rd.dw[i] = sext(rt.w[2i] shift (rs.w[2i] & 31)); note the rd, rt, rs order
+:psllvw RDQ, RTQ, RSQ       is prime=0x1C & fct=0x09 & ee_mmiop=0x02 & RDQ & RSQ & RTQ {
+    local ws0:4 = RSQ:4;  local ws2:4 = RSQ(8);
+    local wt0:4 = RTQ:4;  local wt2:4 = RTQ(8);
+    local r0:4 = wt0 << (ws0 & 0x1F);
+    local r1:4 = wt2 << (ws2 & 0x1F);
+    local d0:8 = sext(r0);
+    local d1:8 = sext(r1);
+    pack2d(RDQ, d0, d1);
+}
+:psrlvw RDQ, RTQ, RSQ       is prime=0x1C & fct=0x09 & ee_mmiop=0x03 & RDQ & RSQ & RTQ {
+    local ws0:4 = RSQ:4;  local ws2:4 = RSQ(8);
+    local wt0:4 = RTQ:4;  local wt2:4 = RTQ(8);
+    local r0:4 = wt0 >> (ws0 & 0x1F);
+    local r1:4 = wt2 >> (ws2 & 0x1F);
+    local d0:8 = sext(r0);
+    local d1:8 = sext(r1);
+    pack2d(RDQ, d0, d1);
+}
+:psravw RDQ, RTQ, RSQ       is prime=0x1C & fct=0x29 & ee_mmiop=0x03 & RDQ & RSQ & RTQ {
+    local ws0:4 = RSQ:4;  local ws2:4 = RSQ(8);
+    local wt0:4 = RTQ:4;  local wt2:4 = RTQ(8);
+    local r0:4 = wt0 s>> (ws0 & 0x1F);
+    local r1:4 = wt2 s>> (ws2 & 0x1F);
+    local d0:8 = sext(r0);
+    local d1:8 = sext(r1);
+    pack2d(RDQ, d0, d1);
+}
+
+# HI/LO <-> GPR (128-bit)
+:pmfhi RDQ                  is prime=0x1C & fct=0x09 & ee_mmiop=0x08 & rs=0 & rt=0 & RDQ { RDQ = hi_qw; }
+:pmflo RDQ                  is prime=0x1C & fct=0x09 & ee_mmiop=0x09 & rs=0 & rt=0 & RDQ { RDQ = lo_qw; }
+:pmthi RSQ                  is prime=0x1C & fct=0x29 & ee_mmiop=0x08 & rt=0 & rd=0 & RSQ { hi_qw = RSQ; }
+:pmtlo RSQ                  is prime=0x1C & fct=0x29 & ee_mmiop=0x09 & rt=0 & rd=0 & RSQ { lo_qw = RSQ; }
+
+# Doubleword copies
+:pcpyld RDQ, RSQ, RTQ       is prime=0x1C & fct=0x09 & ee_mmiop=0x0E & RDQ & RSQ & RTQ {
+    local d0:8 = RTQ:8;
+    local d1:8 = RSQ:8;
+    pack2d(RDQ, d0, d1);
+}
+:pcpyud RDQ, RSQ, RTQ       is prime=0x1C & fct=0x29 & ee_mmiop=0x0E & RDQ & RSQ & RTQ {
+    local d0:8 = RSQ(8);
+    local d1:8 = RTQ(8);
+    pack2d(RDQ, d0, d1);
+}
+:pcpyh RDQ, RTQ             is prime=0x1C & fct=0x29 & ee_mmiop=0x1B & rs=0 & RDQ & RTQ {
+    local h0:2 = RTQ:2;
+    local h4:2 = RTQ(8);
+    local d0:8 = zext(h0) * 0x0001000100010001;
+    local d1:8 = zext(h4) * 0x0001000100010001;
+    pack2d(RDQ, d0, d1);
+}
+
+# 128-bit logic
+:pand RDQ, RSQ, RTQ         is prime=0x1C & fct=0x09 & ee_mmiop=0x12 & RDQ & RSQ & RTQ { RDQ = RSQ & RTQ; }
+:pxor RDQ, RSQ, RTQ         is prime=0x1C & fct=0x09 & ee_mmiop=0x13 & RDQ & RSQ & RTQ { RDQ = RSQ ^ RTQ; }
+:por RDQ, RSQ, RTQ          is prime=0x1C & fct=0x29 & ee_mmiop=0x12 & RDQ & RSQ & RTQ { RDQ = RSQ | RTQ; }
+:pnor RDQ, RSQ, RTQ         is prime=0x1C & fct=0x29 & ee_mmiop=0x13 & RDQ & RSQ & RTQ { RDQ = ~(RSQ | RTQ); }
+
+# Word permutations of rt
+:pexew RDQ, RTQ             is prime=0x1C & fct=0x09 & ee_mmiop=0x1E & rs=0 & RDQ & RTQ {
+    local wt0:4; local wt1:4; local wt2:4; local wt3:4;
+    split4w(RTQ, wt0, wt1, wt2, wt3);
+    pack4w(RDQ, wt2, wt1, wt0, wt3);
+}
+:prot3w RDQ, RTQ            is prime=0x1C & fct=0x09 & ee_mmiop=0x1F & rs=0 & RDQ & RTQ {
+    local wt0:4; local wt1:4; local wt2:4; local wt3:4;
+    split4w(RTQ, wt0, wt1, wt2, wt3);
+    pack4w(RDQ, wt1, wt2, wt0, wt3);
+}
+:pexcw RDQ, RTQ             is prime=0x1C & fct=0x29 & ee_mmiop=0x1E & rs=0 & RDQ & RTQ {
+    local wt0:4; local wt1:4; local wt2:4; local wt3:4;
+    split4w(RTQ, wt0, wt1, wt2, wt3);
+    pack4w(RDQ, wt0, wt2, wt1, wt3);
+}
+
+# ---------------------------------------------------------------------------------------
+# COP0 (EE forms)
+
+# MFC0/MTC0 with the EE register names (sel is always 0 on the EE)
+:mfc0 RT, ee_c0r            is prime=0x10 & copop=0 & RT & ee_c0r & ee_low11=0 {
+    RT = sext(ee_c0r:4);
+}
+:mtc0 RTsrc, ee_c0r         is prime=0x10 & copop=4 & RTsrc & ee_c0r & ee_low11=0 {
+    local v:4 = RTsrc:4;
+    ee_c0r = sext(v);
+}
+
+# Debug (breakpoint) registers: MF0/MT0 with rd = 24
+:mfbpc RT                   is prime=0x10 & copop=0 & RT & rd=24 & ee_low11=0 { RT = sext(BPC); }
+:mfiab RT                   is prime=0x10 & copop=0 & RT & rd=24 & ee_low11=2 { RT = sext(IAB); }
+:mfiabm RT                  is prime=0x10 & copop=0 & RT & rd=24 & ee_low11=3 { RT = sext(IABM); }
+:mfdab RT                   is prime=0x10 & copop=0 & RT & rd=24 & ee_low11=4 { RT = sext(DAB); }
+:mfdabm RT                  is prime=0x10 & copop=0 & RT & rd=24 & ee_low11=5 { RT = sext(DABM); }
+:mfdvb RT                   is prime=0x10 & copop=0 & RT & rd=24 & ee_low11=6 { RT = sext(DVB); }
+:mfdvbm RT                  is prime=0x10 & copop=0 & RT & rd=24 & ee_low11=7 { RT = sext(DVBM); }
+:mtbpc RTsrc                is prime=0x10 & copop=4 & RTsrc & rd=24 & ee_low11=0 { BPC = RTsrc:4; }
+:mtiab RTsrc                is prime=0x10 & copop=4 & RTsrc & rd=24 & ee_low11=2 { IAB = RTsrc:4; }
+:mtiabm RTsrc               is prime=0x10 & copop=4 & RTsrc & rd=24 & ee_low11=3 { IABM = RTsrc:4; }
+:mtdab RTsrc                is prime=0x10 & copop=4 & RTsrc & rd=24 & ee_low11=4 { DAB = RTsrc:4; }
+:mtdabm RTsrc               is prime=0x10 & copop=4 & RTsrc & rd=24 & ee_low11=5 { DABM = RTsrc:4; }
+:mtdvb RTsrc                is prime=0x10 & copop=4 & RTsrc & rd=24 & ee_low11=6 { DVB = RTsrc:4; }
+:mtdvbm RTsrc               is prime=0x10 & copop=4 & RTsrc & rd=24 & ee_low11=7 { DVBM = RTsrc:4; }
+
+# Performance counters: MF0/MT0 with rd = 25; bit 0 selects PCCR (0) or PCRn (1), n = bits 5..1
+:mfps RT, ee_perf           is prime=0x10 & copop=0 & RT & rd=25 & ee_low11=0 & ee_perf { RT = sext(PCCR); }
+:mfpc RT, ee_perf           is prime=0x10 & copop=0 & RT & rd=25 & ee_low11=1 & ee_perf { RT = sext(PCR0); }
+:mfpc RT, ee_perf           is prime=0x10 & copop=0 & RT & rd=25 & ee_low11=3 & ee_perf { RT = sext(PCR1); }
+:mtps RTsrc, ee_perf        is prime=0x10 & copop=4 & RTsrc & rd=25 & ee_low11=0 & ee_perf { PCCR = RTsrc:4; }
+:mtpc RTsrc, ee_perf        is prime=0x10 & copop=4 & RTsrc & rd=25 & ee_low11=1 & ee_perf { PCR0 = RTsrc:4; }
+:mtpc RTsrc, ee_perf        is prime=0x10 & copop=4 & RTsrc & rd=25 & ee_low11=3 & ee_perf { PCR1 = RTsrc:4; }
+
+# 0100 0010 0000 0000 0000 0000 0011 1000   (sets Status.EIE, bit 16)
+:ei                         is prime=0x10 & bit25=1 & copfill=0 & fct=0x38 {
+    Status = Status | 0x10000;
+}
+# 0100 0010 0000 0000 0000 0000 0011 1001   (clears Status.EIE)
+:di                         is prime=0x10 & bit25=1 & copfill=0 & fct=0x39 {
+    Status = Status & ~0x10000;
+}
+
+# BC0F/BC0T/BC0FL/BC0TL: 0100 0001 0000 00tl iiii iiii iiii iiii (CPCOND0)
+:bc0f Rel16                 is prime=0x10 & copop=8 & cond=0 & Rel16 {
+    local tmp:1 = getCopCondition(0:1, 0:1);
+    delayslot(1);
+    if (tmp != 0) goto inst_next;
+    goto Rel16;
+}
+:bc0t Rel16                 is prime=0x10 & copop=8 & cond=1 & Rel16 {
+    local tmp:1 = getCopCondition(0:1, 0:1);
+    delayslot(1);
+    if (tmp == 0) goto inst_next;
+    goto Rel16;
+}
+:bc0fl Rel16                is prime=0x10 & copop=8 & cond=2 & Rel16 {
+    local tmp:1 = getCopCondition(0:1, 0:1);
+    if (tmp != 0) goto inst_next;
+    delayslot(1);
+    goto Rel16;
+}
+:bc0tl Rel16                is prime=0x10 & copop=8 & cond=3 & Rel16 {
+    local tmp:1 = getCopCondition(0:1, 0:1);
+    if (tmp == 0) goto inst_next;
+    delayslot(1);
+    goto Rel16;
+}
+
+# ---------------------------------------------------------------------------------------
+# COP1 (FPU) EE additions, single precision only. ACC is the FPU accumulator (fpu_acc).
+
+# 0100 0110 000t tttt 0000 0ddd dd00 0100
+:sqrt.S fd, ft              is REL6=0 & prime=0x11 & format=0x10 & fct=0x04 & fs=0 & fd & ft {
+    fd = sqrt(ft);
+}
+# 0100 0110 000t tttt ssss sddd dd01 0110
+:rsqrt.S fd, fs, ft         is REL6=0 & prime=0x11 & format=0x10 & fct=0x16 & fd & fs & ft {
+    fd = fs f/ sqrt(ft);
+}
+# 0100 0110 000t tttt ssss s000 0001 1000
+:adda.S fs, ft              is REL6=0 & prime=0x11 & format=0x10 & fct=0x18 & fd=0 & fs & ft {
+    fpu_acc = fs f+ ft;
+}
+:suba.S fs, ft              is REL6=0 & prime=0x11 & format=0x10 & fct=0x19 & fd=0 & fs & ft {
+    fpu_acc = fs f- ft;
+}
+:mula.S fs, ft              is REL6=0 & prime=0x11 & format=0x10 & fct=0x1A & fd=0 & fs & ft {
+    fpu_acc = fs f* ft;
+}
+:madd.S fd, fs, ft          is REL6=0 & prime=0x11 & format=0x10 & fct=0x1C & fd & fs & ft {
+    fd = fpu_acc f+ (fs f* ft);
+}
+:msub.S fd, fs, ft          is REL6=0 & prime=0x11 & format=0x10 & fct=0x1D & fd & fs & ft {
+    fd = fpu_acc f- (fs f* ft);
+}
+:madda.S fs, ft             is REL6=0 & prime=0x11 & format=0x10 & fct=0x1E & fd=0 & fs & ft {
+    fpu_acc = fpu_acc f+ (fs f* ft);
+}
+:msuba.S fs, ft             is REL6=0 & prime=0x11 & format=0x10 & fct=0x1F & fd=0 & fs & ft {
+    fpu_acc = fpu_acc f- (fs f* ft);
+}
+:max.S fd, fs, ft           is REL6=0 & prime=0x11 & format=0x10 & fct=0x28 & fd & fs & ft {
+    local r:4 = fs;
+    if (fs f>= ft) goto <done>;
+    r = ft;
+    <done>
+    fd = r;
+}
+:min.S fd, fs, ft           is REL6=0 & prime=0x11 & format=0x10 & fct=0x29 & fd & fs & ft {
+    local r:4 = fs;
+    if (fs f<= ft) goto <done>;
+    r = ft;
+    <done>
+    fd = r;
+}
+# C.LT.S / C.LE.S: the EE encodes them as function 0x34 / 0x36 (C.OLT / C.OLE elsewhere)
+:c.lt.S fs, ft              is REL6=0 & prime=0x11 & format=0x10 & fct=0x34 & fd=0 & fs & ft {
+    fcsr[23,1] = fs f< ft;
+}
+:c.le.S fs, ft              is REL6=0 & prime=0x11 & format=0x10 & fct=0x36 & fd=0 & fs & ft {
+    fcsr[23,1] = fs f<= ft;
+}
+
+# ---------------------------------------------------------------------------------------
+# COP2 = VU0 in macro mode: transfers, branches, loads and stores
+
+# QMFC2.NI / QMFC2.I rt, vf: 0100 1000 001t tttt ssss s000 0000 000i
+:qmfc2.ni RT, ee_vfs        is prime=0x12 & copop=1 & RT & ee_rtq & ee_vfs & ee_zero110=0 & ee_ibit=0 { ee_rtq = ee_vfs; }
+:qmfc2.i RT, ee_vfs         is prime=0x12 & copop=1 & RT & ee_rtq & ee_vfs & ee_zero110=0 & ee_ibit=1 { ee_rtq = ee_vfs; }
+# QMTC2.NI / QMTC2.I rt, vf: 0100 1000 101t tttt ssss s000 0000 000i
+:qmtc2.ni RTQ, ee_vfs       is prime=0x12 & copop=5 & RTQ & ee_vfs & ee_zero110=0 & ee_ibit=0 { ee_vfs = RTQ; }
+:qmtc2.i RTQ, ee_vfs        is prime=0x12 & copop=5 & RTQ & ee_vfs & ee_zero110=0 & ee_ibit=1 { ee_vfs = RTQ; }
+# CFC2.NI / CFC2.I rt, id: 0100 1000 010t tttt dddd d000 0000 000i
+:cfc2.ni RT, ee_ctl         is prime=0x12 & copop=2 & RT & ee_ctl & ee_zero110=0 & ee_ibit=0 { RT = sext(ee_ctl); }
+:cfc2.i RT, ee_ctl          is prime=0x12 & copop=2 & RT & ee_ctl & ee_zero110=0 & ee_ibit=1 { RT = sext(ee_ctl); }
+# CTC2.NI / CTC2.I rt, id: 0100 1000 110t tttt dddd d000 0000 000i
+:ctc2.ni RTsrc, ee_ctl      is prime=0x12 & copop=6 & RTsrc & ee_ctl & ee_zero110=0 & ee_ibit=0 { ee_ctl = RTsrc:4; }
+:ctc2.i RTsrc, ee_ctl       is prime=0x12 & copop=6 & RTsrc & ee_ctl & ee_zero110=0 & ee_ibit=1 { ee_ctl = RTsrc:4; }
+
+# BC2F/BC2T/BC2FL/BC2TL: 0100 1001 0000 00tl iiii iiii iiii iiii
+:bc2f Rel16                 is prime=0x12 & copop=8 & cond=0 & Rel16 {
+    local tmp:1 = getCopCondition(2:1, 0:1);
+    delayslot(1);
+    if (tmp != 0) goto inst_next;
+    goto Rel16;
+}
+:bc2t Rel16                 is prime=0x12 & copop=8 & cond=1 & Rel16 {
+    local tmp:1 = getCopCondition(2:1, 0:1);
+    delayslot(1);
+    if (tmp == 0) goto inst_next;
+    goto Rel16;
+}
+:bc2fl Rel16                is prime=0x12 & copop=8 & cond=2 & Rel16 {
+    local tmp:1 = getCopCondition(2:1, 0:1);
+    if (tmp != 0) goto inst_next;
+    delayslot(1);
+    goto Rel16;
+}
+:bc2tl Rel16                is prime=0x12 & copop=8 & cond=3 & Rel16 {
+    local tmp:1 = getCopCondition(2:1, 0:1);
+    if (tmp == 0) goto inst_next;
+    delayslot(1);
+    goto Rel16;
+}
+
+# LQC2 vf, offset(base): 1101 10bb bbbt tttt iiii iiii iiii iiii
+:lqc2 ee_vft, OFF_BASE      is prime=0x36 & ee_vft & OFF_BASE {
+    ee_vft = *[ram]:16 OFF_BASE;
+}
+# SQC2 vf, offset(base): 1111 10bb bbbt tttt iiii iiii iiii iiii
+:sqc2 ee_vft, OFF_BASE      is prime=0x3E & ee_vft & OFF_BASE {
+    *[ram]:16 OFF_BASE = ee_vft;
+}
+
+# ---------------------------------------------------------------------------------------
+# MMI parallel instructions implemented as pcodeop calls (halfword/byte lanes, saturation,
+# compares, min/max, absolute value, pack/extend/interleave).
+
+define pcodeop pcgtw;
+:pcgtw RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x02 & RDQ & RSQ & RTQ { RDQ = pcgtw(RSQ, RTQ); }
+define pcodeop pmaxw;
+:pmaxw RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x03 & RDQ & RSQ & RTQ { RDQ = pmaxw(RSQ, RTQ); }
+define pcodeop paddh;
+:paddh RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x04 & RDQ & RSQ & RTQ { RDQ = paddh(RSQ, RTQ); }
+define pcodeop psubh;
+:psubh RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x05 & RDQ & RSQ & RTQ { RDQ = psubh(RSQ, RTQ); }
+define pcodeop pcgth;
+:pcgth RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x06 & RDQ & RSQ & RTQ { RDQ = pcgth(RSQ, RTQ); }
+define pcodeop pmaxh;
+:pmaxh RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x07 & RDQ & RSQ & RTQ { RDQ = pmaxh(RSQ, RTQ); }
+define pcodeop paddb;
+:paddb RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x08 & RDQ & RSQ & RTQ { RDQ = paddb(RSQ, RTQ); }
+define pcodeop psubb;
+:psubb RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x09 & RDQ & RSQ & RTQ { RDQ = psubb(RSQ, RTQ); }
+define pcodeop pcgtb;
+:pcgtb RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x0A & RDQ & RSQ & RTQ { RDQ = pcgtb(RSQ, RTQ); }
+define pcodeop paddsw;
+:paddsw RDQ, RSQ, RTQ       is prime=0x1C & fct=0x08 & ee_mmiop=0x10 & RDQ & RSQ & RTQ { RDQ = paddsw(RSQ, RTQ); }
+define pcodeop psubsw;
+:psubsw RDQ, RSQ, RTQ       is prime=0x1C & fct=0x08 & ee_mmiop=0x11 & RDQ & RSQ & RTQ { RDQ = psubsw(RSQ, RTQ); }
+define pcodeop paddsh;
+:paddsh RDQ, RSQ, RTQ       is prime=0x1C & fct=0x08 & ee_mmiop=0x14 & RDQ & RSQ & RTQ { RDQ = paddsh(RSQ, RTQ); }
+define pcodeop psubsh;
+:psubsh RDQ, RSQ, RTQ       is prime=0x1C & fct=0x08 & ee_mmiop=0x15 & RDQ & RSQ & RTQ { RDQ = psubsh(RSQ, RTQ); }
+define pcodeop pextlh;
+:pextlh RDQ, RSQ, RTQ       is prime=0x1C & fct=0x08 & ee_mmiop=0x16 & RDQ & RSQ & RTQ { RDQ = pextlh(RSQ, RTQ); }
+define pcodeop ppach;
+:ppach RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x17 & RDQ & RSQ & RTQ { RDQ = ppach(RSQ, RTQ); }
+define pcodeop paddsb;
+:paddsb RDQ, RSQ, RTQ       is prime=0x1C & fct=0x08 & ee_mmiop=0x18 & RDQ & RSQ & RTQ { RDQ = paddsb(RSQ, RTQ); }
+define pcodeop psubsb;
+:psubsb RDQ, RSQ, RTQ       is prime=0x1C & fct=0x08 & ee_mmiop=0x19 & RDQ & RSQ & RTQ { RDQ = psubsb(RSQ, RTQ); }
+define pcodeop pextlb;
+:pextlb RDQ, RSQ, RTQ       is prime=0x1C & fct=0x08 & ee_mmiop=0x1A & RDQ & RSQ & RTQ { RDQ = pextlb(RSQ, RTQ); }
+define pcodeop ppacb;
+:ppacb RDQ, RSQ, RTQ        is prime=0x1C & fct=0x08 & ee_mmiop=0x1B & RDQ & RSQ & RTQ { RDQ = ppacb(RSQ, RTQ); }
+define pcodeop pext5;
+:pext5 RDQ, RTQ             is prime=0x1C & fct=0x08 & ee_mmiop=0x1E & rs=0 & RDQ & RTQ { RDQ = pext5(RTQ); }
+define pcodeop ppac5;
+:ppac5 RDQ, RTQ             is prime=0x1C & fct=0x08 & ee_mmiop=0x1F & rs=0 & RDQ & RTQ { RDQ = ppac5(RTQ); }
+define pcodeop pabsw;
+:pabsw RDQ, RTQ             is prime=0x1C & fct=0x28 & ee_mmiop=0x01 & rs=0 & RDQ & RTQ { RDQ = pabsw(RTQ); }
+define pcodeop pceqw;
+:pceqw RDQ, RSQ, RTQ        is prime=0x1C & fct=0x28 & ee_mmiop=0x02 & RDQ & RSQ & RTQ { RDQ = pceqw(RSQ, RTQ); }
+define pcodeop pminw;
+:pminw RDQ, RSQ, RTQ        is prime=0x1C & fct=0x28 & ee_mmiop=0x03 & RDQ & RSQ & RTQ { RDQ = pminw(RSQ, RTQ); }
+define pcodeop padsbh;
+:padsbh RDQ, RSQ, RTQ       is prime=0x1C & fct=0x28 & ee_mmiop=0x04 & RDQ & RSQ & RTQ { RDQ = padsbh(RSQ, RTQ); }
+define pcodeop pabsh;
+:pabsh RDQ, RTQ             is prime=0x1C & fct=0x28 & ee_mmiop=0x05 & rs=0 & RDQ & RTQ { RDQ = pabsh(RTQ); }
+define pcodeop pceqh;
+:pceqh RDQ, RSQ, RTQ        is prime=0x1C & fct=0x28 & ee_mmiop=0x06 & RDQ & RSQ & RTQ { RDQ = pceqh(RSQ, RTQ); }
+define pcodeop pminh;
+:pminh RDQ, RSQ, RTQ        is prime=0x1C & fct=0x28 & ee_mmiop=0x07 & RDQ & RSQ & RTQ { RDQ = pminh(RSQ, RTQ); }
+define pcodeop pceqb;
+:pceqb RDQ, RSQ, RTQ        is prime=0x1C & fct=0x28 & ee_mmiop=0x0A & RDQ & RSQ & RTQ { RDQ = pceqb(RSQ, RTQ); }
+define pcodeop padduw;
+:padduw RDQ, RSQ, RTQ       is prime=0x1C & fct=0x28 & ee_mmiop=0x10 & RDQ & RSQ & RTQ { RDQ = padduw(RSQ, RTQ); }
+define pcodeop psubuw;
+:psubuw RDQ, RSQ, RTQ       is prime=0x1C & fct=0x28 & ee_mmiop=0x11 & RDQ & RSQ & RTQ { RDQ = psubuw(RSQ, RTQ); }
+define pcodeop padduh;
+:padduh RDQ, RSQ, RTQ       is prime=0x1C & fct=0x28 & ee_mmiop=0x14 & RDQ & RSQ & RTQ { RDQ = padduh(RSQ, RTQ); }
+define pcodeop psubuh;
+:psubuh RDQ, RSQ, RTQ       is prime=0x1C & fct=0x28 & ee_mmiop=0x15 & RDQ & RSQ & RTQ { RDQ = psubuh(RSQ, RTQ); }
+define pcodeop pextuh;
+:pextuh RDQ, RSQ, RTQ       is prime=0x1C & fct=0x28 & ee_mmiop=0x16 & RDQ & RSQ & RTQ { RDQ = pextuh(RSQ, RTQ); }
+define pcodeop paddub;
+:paddub RDQ, RSQ, RTQ       is prime=0x1C & fct=0x28 & ee_mmiop=0x18 & RDQ & RSQ & RTQ { RDQ = paddub(RSQ, RTQ); }
+define pcodeop psubub;
+:psubub RDQ, RSQ, RTQ       is prime=0x1C & fct=0x28 & ee_mmiop=0x19 & RDQ & RSQ & RTQ { RDQ = psubub(RSQ, RTQ); }
+define pcodeop pextub;
+:pextub RDQ, RSQ, RTQ       is prime=0x1C & fct=0x28 & ee_mmiop=0x1A & RDQ & RSQ & RTQ { RDQ = pextub(RSQ, RTQ); }
+define pcodeop pinth;
+:pinth RDQ, RSQ, RTQ        is prime=0x1C & fct=0x09 & ee_mmiop=0x0A & RDQ & RSQ & RTQ { RDQ = pinth(RSQ, RTQ); }
+define pcodeop pexeh;
+:pexeh RDQ, RTQ             is prime=0x1C & fct=0x09 & ee_mmiop=0x1A & rs=0 & RDQ & RTQ { RDQ = pexeh(RTQ); }
+define pcodeop prevh;
+:prevh RDQ, RTQ             is prime=0x1C & fct=0x09 & ee_mmiop=0x1B & rs=0 & RDQ & RTQ { RDQ = prevh(RTQ); }
+define pcodeop pinteh;
+:pinteh RDQ, RSQ, RTQ       is prime=0x1C & fct=0x29 & ee_mmiop=0x0A & RDQ & RSQ & RTQ { RDQ = pinteh(RSQ, RTQ); }
+define pcodeop pexch;
+:pexch RDQ, RTQ             is prime=0x1C & fct=0x29 & ee_mmiop=0x1A & rs=0 & RDQ & RTQ { RDQ = pexch(RTQ); }
+
+# Halfword multiply / multiply-add / divide: rd, LO and HI are all written (pcodeop per output)
+define pcodeop pmaddh;
+define pcodeop pmaddh_lo;
+define pcodeop pmaddh_hi;
+:pmaddh RDQ, RSQ, RTQ       is prime=0x1C & fct=0x09 & ee_mmiop=0x10 & RDQ & RSQ & RTQ {
+    local olo:16 = lo_qw;
+    local ohi:16 = hi_qw;
+    local res:16 = pmaddh(RSQ, RTQ, olo, ohi);
+    lo_qw = pmaddh_lo(RSQ, RTQ, olo, ohi);
+    hi_qw = pmaddh_hi(RSQ, RTQ, olo, ohi);
+    RDQ = res;
+}
+define pcodeop phmadh;
+define pcodeop phmadh_lo;
+define pcodeop phmadh_hi;
+:phmadh RDQ, RSQ, RTQ       is prime=0x1C & fct=0x09 & ee_mmiop=0x11 & RDQ & RSQ & RTQ {
+    local res:16 = phmadh(RSQ, RTQ);
+    lo_qw = phmadh_lo(RSQ, RTQ);
+    hi_qw = phmadh_hi(RSQ, RTQ);
+    RDQ = res;
+}
+define pcodeop pmsubh;
+define pcodeop pmsubh_lo;
+define pcodeop pmsubh_hi;
+:pmsubh RDQ, RSQ, RTQ       is prime=0x1C & fct=0x09 & ee_mmiop=0x14 & RDQ & RSQ & RTQ {
+    local olo:16 = lo_qw;
+    local ohi:16 = hi_qw;
+    local res:16 = pmsubh(RSQ, RTQ, olo, ohi);
+    lo_qw = pmsubh_lo(RSQ, RTQ, olo, ohi);
+    hi_qw = pmsubh_hi(RSQ, RTQ, olo, ohi);
+    RDQ = res;
+}
+define pcodeop phmsbh;
+define pcodeop phmsbh_lo;
+define pcodeop phmsbh_hi;
+:phmsbh RDQ, RSQ, RTQ       is prime=0x1C & fct=0x09 & ee_mmiop=0x15 & RDQ & RSQ & RTQ {
+    local res:16 = phmsbh(RSQ, RTQ);
+    lo_qw = phmsbh_lo(RSQ, RTQ);
+    hi_qw = phmsbh_hi(RSQ, RTQ);
+    RDQ = res;
+}
+define pcodeop pmulth;
+define pcodeop pmulth_lo;
+define pcodeop pmulth_hi;
+:pmulth RDQ, RSQ, RTQ       is prime=0x1C & fct=0x09 & ee_mmiop=0x1C & RDQ & RSQ & RTQ {
+    local res:16 = pmulth(RSQ, RTQ);
+    lo_qw = pmulth_lo(RSQ, RTQ);
+    hi_qw = pmulth_hi(RSQ, RTQ);
+    RDQ = res;
+}
+define pcodeop pdivbw_quotient;
+define pcodeop pdivbw_remainder;
+:pdivbw RSQ, RTQ            is prime=0x1C & fct=0x09 & ee_mmiop=0x1D & rd=0 & RSQ & RTQ {
+    lo_qw = pdivbw_quotient(RSQ, RTQ);
+    hi_qw = pdivbw_remainder(RSQ, RTQ);
+}
+
+# ---------------------------------------------------------------------------------------
+# COP2 = VU0 macro instructions (COP2 with bit 25 set): 0100 101d dddd tttt tsss sddd ddff ffff
+# dest = xyzw write mask (bits 24..21), ft/fs/fd = vf registers, bc = broadcast field (bits 1..0).
+# Functions 0x3C-0x3F select the second table, indexed by (bits 10..6) * 4 + (bits 1..0).
+# Semantics are pcodeop calls; the dest mask is passed as the first argument and the old
+# destination value is passed in so that unwritten fields are visibly preserved.
+
+EEDEST: ""            is ee_dest=0 { export 0:1; }
+EEDEST: ".w"          is ee_dest=1 { export 1:1; }
+EEDEST: ".z"          is ee_dest=2 { export 2:1; }
+EEDEST: ".zw"         is ee_dest=3 { export 3:1; }
+EEDEST: ".y"          is ee_dest=4 { export 4:1; }
+EEDEST: ".yw"         is ee_dest=5 { export 5:1; }
+EEDEST: ".yz"         is ee_dest=6 { export 6:1; }
+EEDEST: ".yzw"        is ee_dest=7 { export 7:1; }
+EEDEST: ".x"          is ee_dest=8 { export 8:1; }
+EEDEST: ".xw"         is ee_dest=9 { export 9:1; }
+EEDEST: ".xz"         is ee_dest=10 { export 10:1; }
+EEDEST: ".xzw"        is ee_dest=11 { export 11:1; }
+EEDEST: ".xy"         is ee_dest=12 { export 12:1; }
+EEDEST: ".xyw"        is ee_dest=13 { export 13:1; }
+EEDEST: ".xyz"        is ee_dest=14 { export 14:1; }
+EEDEST: ".xyzw"       is ee_dest=15 { export 15:1; }
+
+EEBC: "x"             is ee_bc=0 { export 0:1; }
+EEBC: "y"             is ee_bc=1 { export 1:1; }
+EEBC: "z"             is ee_bc=2 { export 2:1; }
+EEBC: "w"             is ee_bc=3 { export 3:1; }
+
+EEFTBC: ee_vft^"x"          is ee_vft & ee_bc=0 { local t:4 = ee_vft:4; export t; }
+EEFTBC: ee_vft^"y"          is ee_vft & ee_bc=1 { local t:4 = ee_vft(4); export t; }
+EEFTBC: ee_vft^"z"          is ee_vft & ee_bc=2 { local t:4 = ee_vft(8); export t; }
+EEFTBC: ee_vft^"w"          is ee_vft & ee_bc=3 { local t:4 = ee_vft(12); export t; }
+EEFSF: ee_vfs^".x"          is ee_vfs & ee_fsf=0 { local t:4 = ee_vfs:4; export t; }
+EEFSF: ee_vfs^".y"          is ee_vfs & ee_fsf=1 { local t:4 = ee_vfs(4); export t; }
+EEFSF: ee_vfs^".z"          is ee_vfs & ee_fsf=2 { local t:4 = ee_vfs(8); export t; }
+EEFSF: ee_vfs^".w"          is ee_vfs & ee_fsf=3 { local t:4 = ee_vfs(12); export t; }
+EEFTF: ee_vft^".x"          is ee_vft & ee_ftf=0 { local t:4 = ee_vft:4; export t; }
+EEFTF: ee_vft^".y"          is ee_vft & ee_ftf=1 { local t:4 = ee_vft(4); export t; }
+EEFTF: ee_vft^".z"          is ee_vft & ee_ftf=2 { local t:4 = ee_vft(8); export t; }
+EEFTF: ee_vft^".w"          is ee_vft & ee_ftf=3 { local t:4 = ee_vft(12); export t; }
+
+EECALLMS: addr  is ee_imm15 [ addr = ee_imm15 << 3; ] { export *[const]:4 addr; }
+
+define pcodeop vaddbc;
+:vadd^EEBC^EEDEST ee_vfd, ee_vfs, EEFTBC        is prime=0x12 & bit25=1 & ee_vfunc2=0 & EEBC & EEDEST & ee_vfd & ee_vfs & EEFTBC { ee_vfd = vaddbc(EEDEST, ee_vfd, ee_vfs, EEFTBC); }
+define pcodeop vsubbc;
+:vsub^EEBC^EEDEST ee_vfd, ee_vfs, EEFTBC        is prime=0x12 & bit25=1 & ee_vfunc2=1 & EEBC & EEDEST & ee_vfd & ee_vfs & EEFTBC { ee_vfd = vsubbc(EEDEST, ee_vfd, ee_vfs, EEFTBC); }
+define pcodeop vmaddbc;
+:vmadd^EEBC^EEDEST ee_vfd, ee_vfs, EEFTBC       is prime=0x12 & bit25=1 & ee_vfunc2=2 & EEBC & EEDEST & ee_vfd & ee_vfs & EEFTBC { ee_vfd = vmaddbc(EEDEST, ee_vfd, vu0_acc, ee_vfs, EEFTBC); }
+define pcodeop vmsubbc;
+:vmsub^EEBC^EEDEST ee_vfd, ee_vfs, EEFTBC       is prime=0x12 & bit25=1 & ee_vfunc2=3 & EEBC & EEDEST & ee_vfd & ee_vfs & EEFTBC { ee_vfd = vmsubbc(EEDEST, ee_vfd, vu0_acc, ee_vfs, EEFTBC); }
+define pcodeop vmaxbc;
+:vmax^EEBC^EEDEST ee_vfd, ee_vfs, EEFTBC        is prime=0x12 & bit25=1 & ee_vfunc2=4 & EEBC & EEDEST & ee_vfd & ee_vfs & EEFTBC { ee_vfd = vmaxbc(EEDEST, ee_vfd, ee_vfs, EEFTBC); }
+define pcodeop vminibc;
+:vmini^EEBC^EEDEST ee_vfd, ee_vfs, EEFTBC       is prime=0x12 & bit25=1 & ee_vfunc2=5 & EEBC & EEDEST & ee_vfd & ee_vfs & EEFTBC { ee_vfd = vminibc(EEDEST, ee_vfd, ee_vfs, EEFTBC); }
+define pcodeop vmulbc;
+:vmul^EEBC^EEDEST ee_vfd, ee_vfs, EEFTBC        is prime=0x12 & bit25=1 & ee_vfunc2=6 & EEBC & EEDEST & ee_vfd & ee_vfs & EEFTBC { ee_vfd = vmulbc(EEDEST, ee_vfd, ee_vfs, EEFTBC); }
+define pcodeop vmulq;
+:vmulq^EEDEST ee_vfd, ee_vfs, "Q"               is prime=0x12 & bit25=1 & ee_vfunc=0x1C & EEDEST & ee_vfd & ee_vfs { ee_vfd = vmulq(EEDEST, ee_vfd, ee_vfs, vu0_q); }
+define pcodeop vmaxi;
+:vmaxi^EEDEST ee_vfd, ee_vfs, "I"               is prime=0x12 & bit25=1 & ee_vfunc=0x1D & EEDEST & ee_vfd & ee_vfs { ee_vfd = vmaxi(EEDEST, ee_vfd, ee_vfs, vu0_i); }
+define pcodeop vmuli;
+:vmuli^EEDEST ee_vfd, ee_vfs, "I"               is prime=0x12 & bit25=1 & ee_vfunc=0x1E & EEDEST & ee_vfd & ee_vfs { ee_vfd = vmuli(EEDEST, ee_vfd, ee_vfs, vu0_i); }
+define pcodeop vminii;
+:vminii^EEDEST ee_vfd, ee_vfs, "I"              is prime=0x12 & bit25=1 & ee_vfunc=0x1F & EEDEST & ee_vfd & ee_vfs { ee_vfd = vminii(EEDEST, ee_vfd, ee_vfs, vu0_i); }
+define pcodeop vaddq;
+:vaddq^EEDEST ee_vfd, ee_vfs, "Q"               is prime=0x12 & bit25=1 & ee_vfunc=0x20 & EEDEST & ee_vfd & ee_vfs { ee_vfd = vaddq(EEDEST, ee_vfd, ee_vfs, vu0_q); }
+define pcodeop vmaddq;
+:vmaddq^EEDEST ee_vfd, ee_vfs, "Q"              is prime=0x12 & bit25=1 & ee_vfunc=0x21 & EEDEST & ee_vfd & ee_vfs { ee_vfd = vmaddq(EEDEST, ee_vfd, vu0_acc, ee_vfs, vu0_q); }
+define pcodeop vaddi;
+:vaddi^EEDEST ee_vfd, ee_vfs, "I"               is prime=0x12 & bit25=1 & ee_vfunc=0x22 & EEDEST & ee_vfd & ee_vfs { ee_vfd = vaddi(EEDEST, ee_vfd, ee_vfs, vu0_i); }
+define pcodeop vmaddi;
+:vmaddi^EEDEST ee_vfd, ee_vfs, "I"              is prime=0x12 & bit25=1 & ee_vfunc=0x23 & EEDEST & ee_vfd & ee_vfs { ee_vfd = vmaddi(EEDEST, ee_vfd, vu0_acc, ee_vfs, vu0_i); }
+define pcodeop vsubq;
+:vsubq^EEDEST ee_vfd, ee_vfs, "Q"               is prime=0x12 & bit25=1 & ee_vfunc=0x24 & EEDEST & ee_vfd & ee_vfs { ee_vfd = vsubq(EEDEST, ee_vfd, ee_vfs, vu0_q); }
+define pcodeop vmsubq;
+:vmsubq^EEDEST ee_vfd, ee_vfs, "Q"              is prime=0x12 & bit25=1 & ee_vfunc=0x25 & EEDEST & ee_vfd & ee_vfs { ee_vfd = vmsubq(EEDEST, ee_vfd, vu0_acc, ee_vfs, vu0_q); }
+define pcodeop vsubi;
+:vsubi^EEDEST ee_vfd, ee_vfs, "I"               is prime=0x12 & bit25=1 & ee_vfunc=0x26 & EEDEST & ee_vfd & ee_vfs { ee_vfd = vsubi(EEDEST, ee_vfd, ee_vfs, vu0_i); }
+define pcodeop vmsubi;
+:vmsubi^EEDEST ee_vfd, ee_vfs, "I"              is prime=0x12 & bit25=1 & ee_vfunc=0x27 & EEDEST & ee_vfd & ee_vfs { ee_vfd = vmsubi(EEDEST, ee_vfd, vu0_acc, ee_vfs, vu0_i); }
+define pcodeop vadd;
+:vadd^EEDEST ee_vfd, ee_vfs, ee_vft             is prime=0x12 & bit25=1 & ee_vfunc=0x28 & EEDEST & ee_vfd & ee_vfs & ee_vft { ee_vfd = vadd(EEDEST, ee_vfd, ee_vfs, ee_vft); }
+define pcodeop vmadd;
+:vmadd^EEDEST ee_vfd, ee_vfs, ee_vft            is prime=0x12 & bit25=1 & ee_vfunc=0x29 & EEDEST & ee_vfd & ee_vfs & ee_vft { ee_vfd = vmadd(EEDEST, ee_vfd, vu0_acc, ee_vfs, ee_vft); }
+define pcodeop vmul;
+:vmul^EEDEST ee_vfd, ee_vfs, ee_vft             is prime=0x12 & bit25=1 & ee_vfunc=0x2A & EEDEST & ee_vfd & ee_vfs & ee_vft { ee_vfd = vmul(EEDEST, ee_vfd, ee_vfs, ee_vft); }
+define pcodeop vmax;
+:vmax^EEDEST ee_vfd, ee_vfs, ee_vft             is prime=0x12 & bit25=1 & ee_vfunc=0x2B & EEDEST & ee_vfd & ee_vfs & ee_vft { ee_vfd = vmax(EEDEST, ee_vfd, ee_vfs, ee_vft); }
+define pcodeop vsub;
+:vsub^EEDEST ee_vfd, ee_vfs, ee_vft             is prime=0x12 & bit25=1 & ee_vfunc=0x2C & EEDEST & ee_vfd & ee_vfs & ee_vft { ee_vfd = vsub(EEDEST, ee_vfd, ee_vfs, ee_vft); }
+define pcodeop vmsub;
+:vmsub^EEDEST ee_vfd, ee_vfs, ee_vft            is prime=0x12 & bit25=1 & ee_vfunc=0x2D & EEDEST & ee_vfd & ee_vfs & ee_vft { ee_vfd = vmsub(EEDEST, ee_vfd, vu0_acc, ee_vfs, ee_vft); }
+define pcodeop vopmsub;
+:vopmsub^EEDEST ee_vfd, ee_vfs, ee_vft          is prime=0x12 & bit25=1 & ee_vfunc=0x2E & EEDEST & ee_vfd & ee_vfs & ee_vft { ee_vfd = vopmsub(EEDEST, ee_vfd, vu0_acc, ee_vfs, ee_vft); }
+define pcodeop vmini;
+:vmini^EEDEST ee_vfd, ee_vfs, ee_vft            is prime=0x12 & bit25=1 & ee_vfunc=0x2F & EEDEST & ee_vfd & ee_vfs & ee_vft { ee_vfd = vmini(EEDEST, ee_vfd, ee_vfs, ee_vft); }
+:viadd ee_vid, ee_vis, ee_vit                   is prime=0x12 & bit25=1 & ee_vfunc=0x30 & ee_vid & ee_vis & ee_vit { ee_vid = ee_vis + ee_vit; }
+:visub ee_vid, ee_vis, ee_vit                   is prime=0x12 & bit25=1 & ee_vfunc=0x31 & ee_vid & ee_vis & ee_vit { ee_vid = ee_vis - ee_vit; }
+:viaddi ee_vit, ee_vis, ee_imm5                 is prime=0x12 & bit25=1 & ee_vfunc=0x32 & ee_vit & ee_vis & ee_imm5 { ee_vit = ee_vis + ee_imm5; }
+:viand ee_vid, ee_vis, ee_vit                   is prime=0x12 & bit25=1 & ee_vfunc=0x34 & ee_vid & ee_vis & ee_vit { ee_vid = ee_vis & ee_vit; }
+:vior ee_vid, ee_vis, ee_vit                    is prime=0x12 & bit25=1 & ee_vfunc=0x35 & ee_vid & ee_vis & ee_vit { ee_vid = ee_vis | ee_vit; }
+define pcodeop vcallms;
+:vcallms EECALLMS                               is prime=0x12 & bit25=1 & ee_vfunc=0x38 & EECALLMS { vcallms(EECALLMS); }
+:vcallmsr "vi27"                                is prime=0x12 & bit25=1 & ee_vfunc=0x39 { vcallms(vu0_cmsar0); }
+define pcodeop vaddabc;
+:vadda^EEBC^EEDEST "ACC", ee_vfs, EEFTBC        is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x00 & EEBC & EEDEST & ee_vfs & EEFTBC { vu0_acc = vaddabc(EEDEST, vu0_acc, ee_vfs, EEFTBC); }
+define pcodeop vsubabc;
+:vsuba^EEBC^EEDEST "ACC", ee_vfs, EEFTBC        is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x01 & EEBC & EEDEST & ee_vfs & EEFTBC { vu0_acc = vsubabc(EEDEST, vu0_acc, ee_vfs, EEFTBC); }
+define pcodeop vmaddabc;
+:vmadda^EEBC^EEDEST "ACC", ee_vfs, EEFTBC       is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x02 & EEBC & EEDEST & ee_vfs & EEFTBC { vu0_acc = vmaddabc(EEDEST, vu0_acc, ee_vfs, EEFTBC); }
+define pcodeop vmsubabc;
+:vmsuba^EEBC^EEDEST "ACC", ee_vfs, EEFTBC       is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x03 & EEBC & EEDEST & ee_vfs & EEFTBC { vu0_acc = vmsubabc(EEDEST, vu0_acc, ee_vfs, EEFTBC); }
+define pcodeop vmulabc;
+:vmula^EEBC^EEDEST "ACC", ee_vfs, EEFTBC        is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x06 & EEBC & EEDEST & ee_vfs & EEFTBC { vu0_acc = vmulabc(EEDEST, vu0_acc, ee_vfs, EEFTBC); }
+define pcodeop vitof0;
+:vitof0^EEDEST ee_vft, ee_vfs                   is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x04 & ee_bc=0 & EEDEST & ee_vft & ee_vfs { ee_vft = vitof0(EEDEST, ee_vft, ee_vfs); }
+define pcodeop vitof4;
+:vitof4^EEDEST ee_vft, ee_vfs                   is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x04 & ee_bc=1 & EEDEST & ee_vft & ee_vfs { ee_vft = vitof4(EEDEST, ee_vft, ee_vfs); }
+define pcodeop vitof12;
+:vitof12^EEDEST ee_vft, ee_vfs                  is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x04 & ee_bc=2 & EEDEST & ee_vft & ee_vfs { ee_vft = vitof12(EEDEST, ee_vft, ee_vfs); }
+define pcodeop vitof15;
+:vitof15^EEDEST ee_vft, ee_vfs                  is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x04 & ee_bc=3 & EEDEST & ee_vft & ee_vfs { ee_vft = vitof15(EEDEST, ee_vft, ee_vfs); }
+define pcodeop vftoi0;
+:vftoi0^EEDEST ee_vft, ee_vfs                   is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x05 & ee_bc=0 & EEDEST & ee_vft & ee_vfs { ee_vft = vftoi0(EEDEST, ee_vft, ee_vfs); }
+define pcodeop vftoi4;
+:vftoi4^EEDEST ee_vft, ee_vfs                   is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x05 & ee_bc=1 & EEDEST & ee_vft & ee_vfs { ee_vft = vftoi4(EEDEST, ee_vft, ee_vfs); }
+define pcodeop vftoi12;
+:vftoi12^EEDEST ee_vft, ee_vfs                  is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x05 & ee_bc=2 & EEDEST & ee_vft & ee_vfs { ee_vft = vftoi12(EEDEST, ee_vft, ee_vfs); }
+define pcodeop vftoi15;
+:vftoi15^EEDEST ee_vft, ee_vfs                  is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x05 & ee_bc=3 & EEDEST & ee_vft & ee_vfs { ee_vft = vftoi15(EEDEST, ee_vft, ee_vfs); }
+define pcodeop vabs;
+:vabs^EEDEST ee_vft, ee_vfs                     is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x07 & ee_bc=1 & EEDEST & ee_vft & ee_vfs { ee_vft = vabs(EEDEST, ee_vft, ee_vfs); }
+define pcodeop vmove;
+:vmove^EEDEST ee_vft, ee_vfs                    is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0C & ee_bc=0 & EEDEST & ee_vft & ee_vfs { ee_vft = vmove(EEDEST, ee_vft, ee_vfs); }
+define pcodeop vmr32;
+:vmr32^EEDEST ee_vft, ee_vfs                    is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0C & ee_bc=1 & EEDEST & ee_vft & ee_vfs { ee_vft = vmr32(EEDEST, ee_vft, ee_vfs); }
+define pcodeop vmulaq;
+:vmulaq^EEDEST "ACC", ee_vfs, "Q"               is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x07 & ee_bc=0 & EEDEST & ee_vfs { vu0_acc = vmulaq(EEDEST, vu0_acc, ee_vfs, vu0_q); }
+define pcodeop vmulai;
+:vmulai^EEDEST "ACC", ee_vfs, "I"               is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x07 & ee_bc=2 & EEDEST & ee_vfs { vu0_acc = vmulai(EEDEST, vu0_acc, ee_vfs, vu0_i); }
+define pcodeop vaddaq;
+:vaddaq^EEDEST "ACC", ee_vfs, "Q"               is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x08 & ee_bc=0 & EEDEST & ee_vfs { vu0_acc = vaddaq(EEDEST, vu0_acc, ee_vfs, vu0_q); }
+define pcodeop vmaddaq;
+:vmaddaq^EEDEST "ACC", ee_vfs, "Q"              is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x08 & ee_bc=1 & EEDEST & ee_vfs { vu0_acc = vmaddaq(EEDEST, vu0_acc, ee_vfs, vu0_q); }
+define pcodeop vaddai;
+:vaddai^EEDEST "ACC", ee_vfs, "I"               is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x08 & ee_bc=2 & EEDEST & ee_vfs { vu0_acc = vaddai(EEDEST, vu0_acc, ee_vfs, vu0_i); }
+define pcodeop vmaddai;
+:vmaddai^EEDEST "ACC", ee_vfs, "I"              is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x08 & ee_bc=3 & EEDEST & ee_vfs { vu0_acc = vmaddai(EEDEST, vu0_acc, ee_vfs, vu0_i); }
+define pcodeop vsubaq;
+:vsubaq^EEDEST "ACC", ee_vfs, "Q"               is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x09 & ee_bc=0 & EEDEST & ee_vfs { vu0_acc = vsubaq(EEDEST, vu0_acc, ee_vfs, vu0_q); }
+define pcodeop vmsubaq;
+:vmsubaq^EEDEST "ACC", ee_vfs, "Q"              is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x09 & ee_bc=1 & EEDEST & ee_vfs { vu0_acc = vmsubaq(EEDEST, vu0_acc, ee_vfs, vu0_q); }
+define pcodeop vsubai;
+:vsubai^EEDEST "ACC", ee_vfs, "I"               is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x09 & ee_bc=2 & EEDEST & ee_vfs { vu0_acc = vsubai(EEDEST, vu0_acc, ee_vfs, vu0_i); }
+define pcodeop vmsubai;
+:vmsubai^EEDEST "ACC", ee_vfs, "I"              is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x09 & ee_bc=3 & EEDEST & ee_vfs { vu0_acc = vmsubai(EEDEST, vu0_acc, ee_vfs, vu0_i); }
+define pcodeop vadda;
+:vadda^EEDEST "ACC", ee_vfs, ee_vft             is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0A & ee_bc=0 & EEDEST & ee_vfs & ee_vft { vu0_acc = vadda(EEDEST, vu0_acc, ee_vfs, ee_vft); }
+define pcodeop vmadda;
+:vmadda^EEDEST "ACC", ee_vfs, ee_vft            is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0A & ee_bc=1 & EEDEST & ee_vfs & ee_vft { vu0_acc = vmadda(EEDEST, vu0_acc, ee_vfs, ee_vft); }
+define pcodeop vmula;
+:vmula^EEDEST "ACC", ee_vfs, ee_vft             is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0A & ee_bc=2 & EEDEST & ee_vfs & ee_vft { vu0_acc = vmula(EEDEST, vu0_acc, ee_vfs, ee_vft); }
+define pcodeop vsuba;
+:vsuba^EEDEST "ACC", ee_vfs, ee_vft             is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0B & ee_bc=0 & EEDEST & ee_vfs & ee_vft { vu0_acc = vsuba(EEDEST, vu0_acc, ee_vfs, ee_vft); }
+define pcodeop vmsuba;
+:vmsuba^EEDEST "ACC", ee_vfs, ee_vft            is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0B & ee_bc=1 & EEDEST & ee_vfs & ee_vft { vu0_acc = vmsuba(EEDEST, vu0_acc, ee_vfs, ee_vft); }
+define pcodeop vopmula;
+:vopmula^EEDEST "ACC", ee_vfs, ee_vft           is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0B & ee_bc=2 & EEDEST & ee_vfs & ee_vft { vu0_acc = vopmula(EEDEST, vu0_acc, ee_vfs, ee_vft); }
+define pcodeop vclipw;
+:vclipw^EEDEST ee_vfs, EEFTBC                   is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x07 & ee_bc=3 & EEDEST & ee_vfs & EEFTBC { vu0_clipping = vclipw(vu0_clipping, ee_vfs, EEFTBC); }
+:vnop                                           is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0B & ee_bc=3 { }
+define pcodeop vlq;
+define pcodeop vsq;
+:vlqi^EEDEST ee_vft, (ee_vis^"++")              is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0D & ee_bc=0 & EEDEST & ee_vft & ee_vis { ee_vft = vlq(EEDEST, ee_vft, ee_vis); ee_vis = ee_vis + 1; }
+:vsqi^EEDEST ee_vfs, (ee_vit^"++")              is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0D & ee_bc=1 & EEDEST & ee_vfs & ee_vit { vsq(EEDEST, ee_vfs, ee_vit); ee_vit = ee_vit + 1; }
+:vlqd^EEDEST ee_vft, ("--"^ee_vis)              is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0D & ee_bc=2 & EEDEST & ee_vft & ee_vis { ee_vis = ee_vis - 1; ee_vft = vlq(EEDEST, ee_vft, ee_vis); }
+:vsqd^EEDEST ee_vfs, ("--"^ee_vit)              is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0D & ee_bc=3 & EEDEST & ee_vfs & ee_vit { ee_vit = ee_vit - 1; vsq(EEDEST, ee_vfs, ee_vit); }
+define pcodeop vdiv;
+define pcodeop vsqrt;
+define pcodeop vrsqrt;
+define pcodeop vwaitq;
+:vdiv "Q", EEFSF, EEFTF                         is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0E & ee_bc=0 & EEFSF & EEFTF { vu0_q = vdiv(EEFSF, EEFTF); }
+:vsqrt "Q", EEFTF                               is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0E & ee_bc=1 & EEFTF { vu0_q = vsqrt(EEFTF); }
+:vrsqrt "Q", EEFSF, EEFTF                       is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0E & ee_bc=2 & EEFSF & EEFTF { vu0_q = vrsqrt(EEFSF, EEFTF); }
+:vwaitq                                         is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0E & ee_bc=3 { vwaitq(); }
+define pcodeop vmtir;
+define pcodeop vmfir;
+define pcodeop vilwr;
+define pcodeop viswr;
+:vmtir ee_vit, EEFSF                            is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0F & ee_bc=0 & ee_vit & EEFSF { ee_vit = vmtir(EEFSF); }
+:vmfir^EEDEST ee_vft, ee_vis                    is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0F & ee_bc=1 & EEDEST & ee_vft & ee_vis { ee_vft = vmfir(EEDEST, ee_vft, ee_vis); }
+:vilwr^EEDEST ee_vit, (ee_vis)                  is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0F & ee_bc=2 & EEDEST & ee_vit & ee_vis { ee_vit = vilwr(EEDEST, ee_vis); }
+:viswr^EEDEST ee_vit, (ee_vis)                  is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x0F & ee_bc=3 & EEDEST & ee_vit & ee_vis { viswr(EEDEST, ee_vit, ee_vis); }
+define pcodeop vrnext;
+define pcodeop vrget;
+define pcodeop vrinit;
+define pcodeop vrxor;
+:vrnext^EEDEST ee_vft, "R"                      is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x10 & ee_bc=0 & EEDEST & ee_vft { vu0_r = vrnext(vu0_r); ee_vft = vrget(EEDEST, ee_vft, vu0_r); }
+:vrget^EEDEST ee_vft, "R"                       is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x10 & ee_bc=1 & EEDEST & ee_vft { ee_vft = vrget(EEDEST, ee_vft, vu0_r); }
+:vrinit "R", EEFSF                              is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x10 & ee_bc=2 & EEFSF { vu0_r = vrinit(EEFSF); }
+:vrxor "R", EEFSF                               is prime=0x12 & bit25=1 & ee_vfunc2=0xF & ee_sp2=0x10 & ee_bc=3 & EEFSF { vu0_r = vrxor(vu0_r, EEFSF); }
+
