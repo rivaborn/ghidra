@@ -77,7 +77,20 @@ foreach ($src in $changed) {
     $m = [regex]::Match($src, "^Ghidra/([^/]+)/([^/]+)/src/main/java/(.+)\.java$")
     $area = $m.Groups[1].Value; $module = $m.Groups[2].Value; $rel = $m.Groups[3].Value
     $moduleJar = Join-Path $OutDir "Ghidra\$area\$module\lib\$module.jar"
-    if (-not (Test-Path $moduleJar)) { throw "no jar for $src ($moduleJar)" }
+    $jarMode = "uf"
+    if (-not (Test-Path $moduleJar)) {
+        # a module this branch adds (ConsoleFormats): its folder, manifest and data, and a new jar
+        $srcModule = Join-Path $repo "Ghidra\$area\$module"
+        if (-not (Test-Path (Join-Path $srcModule "Module.manifest"))) { throw "no jar for $src ($moduleJar)" }
+        $dstModule = Join-Path $OutDir "Ghidra\$area\$module"
+        New-Item -ItemType Directory -Force (Join-Path $dstModule "lib") | Out-Null
+        foreach ($item in @("Module.manifest", "data")) {
+            $from = Join-Path $srcModule $item
+            if (Test-Path $from) { Copy-Item -Recurse -Force $from $dstModule }
+        }
+        $jarMode = "cf"
+        Write-Output "new module $module"
+    }
     $dir = Split-Path $rel -Parent
     $base = Split-Path $rel -Leaf
     # the class and its nested classes
@@ -87,7 +100,7 @@ foreach ($src in $changed) {
     if (-not $files) { throw "no classes compiled for $src" }
     $jarArgs = @()
     foreach ($f in $files) { $jarArgs += @("-C", $classes, $f) }  # -C applies to the next file only
-    & $jar uf $moduleJar @jarArgs
+    & $jar $jarMode $moduleJar @jarArgs
     if ($LASTEXITCODE -ne 0) { throw "jar update failed for $moduleJar" }
     Write-Output ("{0,-12} {1} ({2} classes)" -f $module, $rel, @($files).Count)
 }
