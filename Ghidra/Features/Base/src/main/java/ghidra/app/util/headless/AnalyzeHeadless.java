@@ -58,6 +58,7 @@ public class AnalyzeHeadless implements GhidraLaunchable {
 		READ_ONLY("-readOnly", false),
 		DELETE_PROJECT("-deleteProject", false),
 		NO_ANALYSIS("-noanalysis", false),
+		FAIL_ON_SCRIPT_ERROR("-failOnScriptError", false),
 		PROCESSOR("-processor", true, "<languageID>"),
 		CSPEC("-cspec", true, "<compilerSpecID>"),
 		ANALYSIS_TIMEOUT_PER_FILE("-analysisTimeoutPerFile", true, "<timeout in seconds>"),
@@ -107,6 +108,7 @@ public class AnalyzeHeadless implements GhidraLaunchable {
 	}
 
 	private static final int EXIT_CODE_ERROR = 1;
+	private static final int EXIT_CODE_SCRIPT_ERROR = 2;	// -failOnScriptError
 
 	/**
 	 * The entry point of 'analyzeHeadless.bat'. Parses the command line arguments to the script
@@ -221,6 +223,11 @@ public class AnalyzeHeadless implements GhidraLaunchable {
 				"Abort due to Headless analyzer error: " + e.getMessage(), e);
 			System.exit(EXIT_CODE_ERROR);
 		}
+		if (options.failOnScriptError && analyzer.getScriptErrorCount() > 0) {
+			Msg.error(HeadlessAnalyzer.class, "REPORT: " + analyzer.getScriptErrorCount() +
+				" script error(s); exit code " + EXIT_CODE_SCRIPT_ERROR + " (-failOnScriptError)");
+			System.exit(EXIT_CODE_SCRIPT_ERROR);
+		}
 	}
 
 	/**
@@ -266,6 +273,9 @@ public class AnalyzeHeadless implements GhidraLaunchable {
 			}
 			else if (checkArgument(Arg.NO_ANALYSIS, args, argi)) {
 				options.enableAnalysis(false);
+			}
+			else if (checkArgument(Arg.FAIL_ON_SCRIPT_ERROR, args, argi)) {
+				options.setFailOnScriptError(true);
 			}
 			else if (checkArgument(Arg.DELETE_PROJECT, args, argi)) {
 				options.setDeleteCreatedProjectOnClose(true);

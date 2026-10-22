@@ -79,6 +79,7 @@ public class HeadlessAnalyzer {
 	private HeadlessGhidraProjectManager projectManager;
 	private Project project;
 	private boolean analysisTimedOut;
+	private int scriptErrors;	// REPORT SCRIPT ERROR count (-failOnScriptError)
 	private DomainFolder saveDomainFolder;
 	private Map<String, Object> storage;
 	private URLClassLoader classLoaderForDotClassScripts;
@@ -581,6 +582,14 @@ public class HeadlessAnalyzer {
 	 * @param script Script to be run.
 	 * @return  whether the script successfully completed running
 	 */
+	/**
+	 * @return the number of script errors reported so far (a script that threw, or that could
+	 * not be found or compiled)
+	 */
+	public int getScriptErrorCount() {
+		return scriptErrors;
+	}
+
 	private boolean runScript(GhidraState scriptState, GhidraScript script) {
 		if (script instanceof HeadlessScript) {
 			((HeadlessScript) script).setHeadlessInstance(this);
@@ -604,6 +613,7 @@ public class HeadlessAnalyzer {
 		catch (Exception exc) {
 			String logErrorMsg = "REPORT SCRIPT ERROR: ";
 			Msg.error(this, logErrorMsg, exc);
+			scriptErrors++;
 			return false;
 		}
 
@@ -790,10 +800,12 @@ public class HeadlessAnalyzer {
 			catch (ClassNotFoundException e) {
 				Msg.error(this,
 					"REPORT SCRIPT ERROR: java class not found for '" + className + "'");
+				scriptErrors++;
 			}
 			catch (ClassCastException e) {
 				Msg.error(this,
 					"REPORT SCRIPT ERROR: java class '" + className + "' is not a GhidraScript");
+				scriptErrors++;
 			}
 			throw new IllegalArgumentException("Invalid script: " + scriptName);
 		}
@@ -812,6 +824,7 @@ public class HeadlessAnalyzer {
 		catch (Exception | NoClassDefFoundError exc) {
 			String logErrorMsg = "REPORT SCRIPT ERROR: " + scriptName + " : " + exc.getMessage();
 			Msg.error(this, logErrorMsg);
+			scriptErrors++;
 		}
 		throw new IllegalArgumentException("Invalid script: " + scriptName);
 	}
@@ -985,6 +998,7 @@ public class HeadlessAnalyzer {
 		catch (Exception exc) {
 			String logErrorMsg = "REPORT SCRIPT ERROR: " + scriptName + " : " + exc.getMessage();
 			Msg.error(this, logErrorMsg, exc);
+			scriptErrors++;
 		}
 
 		return retOption;
