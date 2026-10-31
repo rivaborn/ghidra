@@ -1953,7 +1953,11 @@ Rt_GPR64xsp: aa_Xt is aa_Xt { export aa_Xt; }
 Rt_GPR64xsp: sp is aa_Xt=31 & sp { export sp; }
 
 Rs_GPR32: Rm_GPR32 is Rm_GPR32 { export Rm_GPR32; }
-Rs_GPR64: Rm_GPR64 is Rm_GPR64 { export Rm_GPR64; }
+# Rs is also a destination (the status of stxr/stlxr/st64bv): its xzr must be writable, as
+# Rd_GPR64 is. Through Rm_GPR64 (xzr = export 0:8) "stlxr wzr, ..." wrote into a constant, and the
+# decompiler failed with "Assignment to constant" or crashed.
+Rs_GPR64: aa_Xm is aa_Xm { export aa_Xm; }
+Rs_GPR64: xzr is aa_Xm=31 & xzr { tmp:8 = 0; export tmp; }
 
 Rm_fpz16: "#0.0" is Rm { tmp:2 = int2float(0:2); export tmp; }
 Rm_fpz32: "#0.0" is Rm { tmp:4 = int2float(0:4); export tmp; }
