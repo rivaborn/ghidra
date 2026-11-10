@@ -36,7 +36,9 @@ $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.e
 $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vs) { throw "Visual Studio with C++ tools not found" }
 $bat = Join-Path $vs "VC\Auxiliary\Build\vcvarsall.bat"
-cmd /c "`"$bat`" x64 >nul && set" | ForEach-Object {
+# $env:ComSpec, not "cmd": an MSYS2 usr\bin before System32 on PATH (devkitPro's installer adds one) has a bash script
+# named "cmd", which PowerShell cannot run in a pipeline ("Cannot run a document in the middle of a pipeline").
+& $env:ComSpec /c "`"$bat`" x64 >nul && set" | ForEach-Object {
     if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path "Env:$($Matches[1])" -Value $Matches[2] }
 }
 
